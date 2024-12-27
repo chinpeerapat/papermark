@@ -111,6 +111,8 @@ export default async function handle(
                       data?.fromLocation!,
                       data?.toLocation!,
                     ),
+                    metadata: page.metadata ?? {},
+                    pageLinks: page.pageLinks ?? [],
                     versionId: undefined,
                     createdAt: undefined,
                     updatedAt: undefined,
@@ -118,9 +120,6 @@ export default async function handle(
                 },
               },
             },
-          },
-          links: {
-            create: {},
           },
         },
       });

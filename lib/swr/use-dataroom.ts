@@ -1,5 +1,7 @@
 import { useRouter } from "next/router";
 
+import { useMemo } from "react";
+
 import { useTeam } from "@/context/team-context";
 import { Dataroom, DataroomDocument, DataroomFolder } from "@prisma/client";
 import useSWR from "swr";
@@ -56,6 +58,77 @@ export function useDataroomLinks() {
   return {
     links,
     loading: !error && !links,
+    error,
+  };
+}
+
+export function useDataroomItems({
+  root,
+  name,
+}: {
+  root?: boolean;
+  name?: string[];
+}) {
+  const router = useRouter();
+  const { id } = router.query as {
+    id: string;
+  };
+  const teamInfo = useTeam();
+  const teamId = teamInfo?.currentTeam?.id;
+
+  const { data: folderData, error: folderError } = useSWR<
+    DataroomFolderWithCount[]
+  >(
+    teamId &&
+      id &&
+      `/api/teams/${teamId}/datarooms/${id}/folders${root ? "?root=true" : name ? `/${name.join("/")}` : ""}`,
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      dedupingInterval: 30000,
+    },
+  );
+
+  const { data: documentData, error: documentError } = useSWR<
+    DataroomFolderDocument[]
+  >(
+    teamId &&
+      id &&
+      `/api/teams/${teamId}/datarooms/${id}${name ? `/folders/documents/${name.join("/")}` : "/documents"}`,
+
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      dedupingInterval: 30000,
+    },
+  );
+
+  const isLoading =
+    !folderData && !documentData && !folderError && !documentError;
+  const error = folderError || documentError;
+
+  const combinedItems = useMemo(() => {
+    if (!folderData && !documentData) return [];
+
+    const allItems = [
+      ...(folderData || []).map((folder) => ({
+        ...folder,
+        itemType: "folder",
+      })),
+      ...(documentData || []).map((doc) => ({ ...doc, itemType: "document" })),
+    ];
+
+    return allItems.sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+  }, [folderData, documentData]);
+
+  return {
+    items: combinedItems as (
+      | (DataroomFolderWithCount & { itemType: "folder" })
+      | (DataroomFolderDocument & { itemType: "document" })
+    )[],
+    folderCount: folderData?.length || 0,
+    documentCount: documentData?.length || 0,
+    isLoading,
     error,
   };
 }
@@ -133,12 +206,19 @@ export type DataroomFolderWithDocuments = DataroomFolder & {
   }[];
 };
 
-export function useDataroomFoldersTree({ dataroomId }: { dataroomId: string }) {
+export function useDataroomFoldersTree({
+  dataroomId,
+  include_documents,
+}: {
+  dataroomId: string;
+  include_documents?: boolean;
+}) {
   const teamInfo = useTeam();
   const teamId = teamInfo?.currentTeam?.id;
 
   const { data: folders, error } = useSWR<DataroomFolderWithDocuments[]>(
-    teamId && `/api/teams/${teamId}/datarooms/${dataroomId}/folders`,
+    teamId &&
+      `/api/teams/${teamId}/datarooms/${dataroomId}/folders${include_documents ? "?include_documents=true" : ""}`,
     fetcher,
     {
       revalidateOnFocus: false,
@@ -264,6 +344,16 @@ export function useDataroomVisits({ dataroomId }: { dataroomId: string }) {
   };
 }
 
+type DataroomDocumentViewHistory = {
+  id: string;
+  downloadedAt: string;
+  viewedAt: string;
+  document: {
+    id: string;
+    name: string;
+  };
+};
+
 export function useDataroomVisitHistory({
   viewId,
   dataroomId,
@@ -274,7 +364,7 @@ export function useDataroomVisitHistory({
   const teamInfo = useTeam();
   const teamId = teamInfo?.currentTeam?.id;
 
-  const { data: documentViews, error } = useSWR<any[]>(
+  const { data: documentViews, error } = useSWR<DataroomDocumentViewHistory[]>(
     teamId &&
       dataroomId &&
       `/api/teams/${teamId}/datarooms/${dataroomId}/views/${viewId}/history`,

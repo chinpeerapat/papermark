@@ -30,6 +30,8 @@ import {
 import { putFile } from "@/lib/files/put-file";
 import { getSupportedContentType } from "@/lib/utils/get-content-type";
 
+import LinkItem from "../link-item";
+
 export default function AgreementSheet({
   isOpen,
   setIsOpen,
@@ -39,7 +41,7 @@ export default function AgreementSheet({
 }) {
   const teamInfo = useTeam();
   const teamId = teamInfo?.currentTeam?.id;
-  const [data, setData] = useState({ name: "", link: "" });
+  const [data, setData] = useState({ name: "", link: "", requireName: true });
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [currentFile, setCurrentFile] = useState<File | null>(null);
   const [currentLink, setCurrentLink] = useState<string | null>(null);
@@ -57,14 +59,20 @@ export default function AgreementSheet({
     try {
       setIsLoading(true);
 
-      const contentType = getSupportedContentType(currentFile.type);
+      const contentType = currentFile.type;
+      const supportedFileType = getSupportedContentType(contentType);
 
-      if (!contentType || currentFile.type !== "application/pdf") {
-        toast.error("Unsupported file format. Please upload a PDF file.");
+      if (
+        !supportedFileType ||
+        (supportedFileType !== "pdf" && supportedFileType !== "docs")
+      ) {
+        toast.error(
+          "Unsupported file format. Please upload a PDF or Word file.",
+        );
         return;
       }
 
-      const { type, data, numPages } = await putFile({
+      const { type, data, numPages, fileSize } = await putFile({
         file: currentFile,
         teamId: teamId!,
       });
@@ -74,6 +82,8 @@ export default function AgreementSheet({
         key: data!,
         storageType: type!,
         contentType: contentType,
+        supportedFileType: supportedFileType,
+        fileSize: fileSize,
       };
       // create a document in the database
       const response = await createAgreementDocument({
@@ -129,7 +139,7 @@ export default function AgreementSheet({
     } finally {
       setIsLoading(false);
       setIsOpen(false);
-      setData({ name: "", link: "" });
+      setData({ name: "", link: "", requireName: true });
     }
   };
 
@@ -153,7 +163,7 @@ export default function AgreementSheet({
         <form className="flex grow flex-col" onSubmit={handleSubmit}>
           <div className="flex-grow space-y-6">
             <div className="w-full space-y-2">
-              <Label htmlFor="name">Name</Label>
+              <Label htmlFor="name">Display name</Label>
               <Input
                 className="flex w-full rounded-md border-0 bg-background py-1.5 text-foreground shadow-sm ring-1 ring-inset ring-input placeholder:text-muted-foreground focus:ring-2 focus:ring-inset focus:ring-gray-400 sm:text-sm sm:leading-6"
                 id="name"
@@ -169,6 +179,16 @@ export default function AgreementSheet({
                     ...data,
                     name: e.target.value,
                   })
+                }
+              />
+            </div>
+
+            <div>
+              <LinkItem
+                title="Require viewer's name"
+                enabled={data.requireName}
+                action={() =>
+                  setData({ ...data, requireName: !data.requireName })
                 }
               />
             </div>

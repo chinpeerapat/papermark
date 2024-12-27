@@ -4,6 +4,9 @@ import AppMiddleware from "@/lib/middleware/app";
 import DomainMiddleware from "@/lib/middleware/domain";
 
 import { BLOCKED_PATHNAMES } from "./lib/constants";
+import IncomingWebhookMiddleware, {
+  isWebhookPath,
+} from "./lib/middleware/incoming-webhooks";
 import PostHogMiddleware from "./lib/middleware/posthog";
 
 function isAnalyticsPath(path: string) {
@@ -38,6 +41,11 @@ export default async function middleware(req: NextRequest, ev: NextFetchEvent) {
     return PostHogMiddleware(req);
   }
 
+  // Handle incoming webhooks
+  if (isWebhookPath(host)) {
+    return IncomingWebhookMiddleware(req);
+  }
+
   if (
     (process.env.NODE_ENV === "development" && host?.includes(".local")) ||
     (process.env.NODE_ENV !== "development" &&
@@ -51,29 +59,9 @@ export default async function middleware(req: NextRequest, ev: NextFetchEvent) {
   }
 
   if (
-    path !== "/" &&
-    path !== "/v1" &&
-    path !== "/register" &&
-    path !== "/privacy" &&
-    path !== "/terms" &&
-    path !== "/oss-friends" &&
-    path !== "/pricing" &&
-    path !== "/docsend-alternatives" &&
-    path !== "/digify-alternatives" &&
-    path !== "/data-room" &&
-    path !== "/launch-week" &&
-    path !== "/open-source-investors" &&
-    path !== "/investors" &&
-    path !== "/ai" &&
-    path !== "/share-notion-page" &&
-    !path.startsWith("/ai-pitch-deck-generator") &&
-    !path.startsWith("/alternatives") &&
-    !path.startsWith("/solutions") &&
-    !path.startsWith("/investors") &&
-    !path.startsWith("/blog") &&
-    !path.startsWith("/help") &&
-    !path.startsWith("/de") &&
-    !path.startsWith("/view/")
+    !path.startsWith("/view/") &&
+    !path.startsWith("/verify") &&
+    !path.startsWith("/unsubscribe")
   ) {
     return AppMiddleware(req);
   }

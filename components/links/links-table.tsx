@@ -4,10 +4,20 @@ import { useState } from "react";
 
 import { useTeam } from "@/context/team-context";
 import { DocumentVersion } from "@prisma/client";
-import { Settings2Icon } from "lucide-react";
+import {
+  ArchiveIcon,
+  BoxesIcon,
+  Code2Icon,
+  CopyIcon,
+  CopyPlusIcon,
+  EyeIcon,
+  LinkIcon,
+  Settings2Icon,
+} from "lucide-react";
 import { toast } from "sonner";
-import { mutate } from "swr";
+import useSWR, { mutate } from "swr";
 
+import { UpgradePlanModal } from "@/components/billing/upgrade-plan-modal";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -33,13 +43,16 @@ import {
 } from "@/components/ui/table";
 
 import { usePlan } from "@/lib/swr/use-billing";
-import { LinkWithViews } from "@/lib/types";
-import { cn, copyToClipboard, nFormatter, timeAgo } from "@/lib/utils";
+import useLimits from "@/lib/swr/use-limits";
+import { LinkWithViews, WatermarkConfig } from "@/lib/types";
+import { cn, copyToClipboard, fetcher, nFormatter, timeAgo } from "@/lib/utils";
 
 import ProcessStatusBar from "../documents/process-status-bar";
 import BarChart from "../shared/icons/bar-chart";
 import ChevronDown from "../shared/icons/chevron-down";
 import MoreHorizontal from "../shared/icons/more-horizontal";
+import { ButtonTooltip } from "../ui/tooltip";
+import EmbedCodeModal from "./embed-code-modal";
 import LinkSheet, {
   DEFAULT_LINK_PROPS,
   type DEFAULT_LINK_TYPE,
@@ -59,10 +72,26 @@ export default function LinksTable({
   const { plan } = usePlan();
   const teamInfo = useTeam();
 
+  const { canAddLinks } = useLimits();
+  const { data: features } = useSWR<{
+    embedding: boolean;
+  }>(
+    teamInfo?.currentTeam?.id
+      ? `/api/feature-flags?teamId=${teamInfo.currentTeam.id}`
+      : null,
+    fetcher,
+  );
+
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isLinkSheetVisible, setIsLinkSheetVisible] = useState<boolean>(false);
-  const [selectedLink, setSelectedLink] =
-    useState<DEFAULT_LINK_TYPE>(DEFAULT_LINK_PROPS);
+  const [selectedLink, setSelectedLink] = useState<DEFAULT_LINK_TYPE>(
+    DEFAULT_LINK_PROPS(`${targetType}_LINK`),
+  );
+  const [embedModalOpen, setEmbedModalOpen] = useState(false);
+  const [selectedEmbedLink, setSelectedEmbedLink] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
 
   const handleCopyToClipboard = (linkString: string) => {
     copyToClipboard(`${linkString}`, "Link copied to clipboard.");
@@ -97,8 +126,15 @@ export default function LinksTable({
       metaTitle: link.metaTitle,
       metaDescription: link.metaDescription,
       metaImage: link.metaImage,
+      metaFavicon: link.metaFavicon,
       enableAgreement: link.enableAgreement ? link.enableAgreement : false,
       agreementId: link.agreementId,
+      showBanner: link.showBanner ?? false,
+      enableWatermark: link.enableWatermark ?? false,
+      watermarkConfig: link.watermarkConfig as WatermarkConfig | null,
+      audienceType: link.audienceType,
+      groupId: link.groupId,
+      screenShieldPercentage: link.screenShieldPercentage,
     });
     //wait for dropdown to close before opening the link sheet
     setTimeout(() => {
@@ -106,18 +142,42 @@ export default function LinksTable({
     }, 0);
   };
 
+  const handlePreviewLink = async (link: LinkWithViews) => {
+    if (link.domainId && plan === "free") {
+      toast.error("You need to upgrade to preview this link");
+      return;
+    }
+
+    const response = await fetch(`/api/links/${link.id}/preview`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      toast.error("Failed to generate preview link");
+      return;
+    }
+
+    const { previewToken } = await response.json();
+    const previewLink = `${process.env.NEXT_PUBLIC_MARKETING_URL}/view/${link.id}?previewToken=${previewToken}`;
+
+    window.open(previewLink, "_blank");
+  };
+
   const handleDuplicateLink = async (link: LinkWithViews) => {
     setIsLoading(true);
 
-    const response = await fetch(
-      `/api/links/${link.id}/duplicate?teamId=${teamInfo?.currentTeam?.id}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+    const response = await fetch(`/api/links/${link.id}/duplicate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
       },
-    );
+      body: JSON.stringify({
+        teamId: teamInfo?.currentTeam?.id,
+      }),
+    });
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -137,6 +197,22 @@ export default function LinksTable({
 
     toast.success("Link duplicated successfully");
     setIsLoading(false);
+  };
+
+  const AddLinkButton = () => {
+    if (!canAddLinks) {
+      return (
+        <UpgradePlanModal clickedPlan="Pro" trigger={"limit_add_link"}>
+          <Button>Upgrade to Create Link</Button>
+        </UpgradePlanModal>
+      );
+    } else {
+      return (
+        <Button onClick={() => setIsLinkSheetVisible(true)}>
+          Create link to share
+        </Button>
+      );
+    }
   };
 
   const handleArchiveLink = async (
@@ -186,8 +262,6 @@ export default function LinksTable({
 
   const hasFreePlan = plan === "free";
 
-  console.log("links", links);
-
   return (
     <>
       <div className="w-full">
@@ -204,26 +278,34 @@ export default function LinksTable({
                 </TableHead>
                 <TableHead className="w-[250px] sm:w-auto">Views</TableHead>
                 <TableHead>Last Viewed</TableHead>
-                <TableHead className="ftext-center sm:text-right"></TableHead>
+                <TableHead className="text-center sm:text-right"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {links ? (
+              {links && links.length > 0 ? (
                 links
                   .filter((link) => !link.isArchived)
                   .map((link) => (
                     <Collapsible key={link.id} asChild>
                       <>
                         <TableRow key={link.id} className="group/row">
-                          <TableCell className="w-[220px] truncate font-medium">
-                            {link.name || `Link #${link.id.slice(-5)}`}{" "}
-                            {link.domainId && hasFreePlan ? (
-                              <span className="ml-2 rounded-full bg-destructive px-2.5 py-0.5 text-xs text-foreground ring-1 ring-destructive">
-                                Inactive
-                              </span>
-                            ) : null}
+                          <TableCell className="w-[250px] truncate font-medium">
+                            <div className="flex items-center gap-x-2">
+                              {link.groupId ? (
+                                <ButtonTooltip content="Group Link">
+                                  <BoxesIcon className="size-4" />
+                                </ButtonTooltip>
+                              ) : null}
+                              {link.name || `Link #${link.id.slice(-5)}`}
+
+                              {link.domainId && hasFreePlan ? (
+                                <span className="ml-2 rounded-full bg-destructive px-2.5 py-0.5 text-xs text-foreground ring-1 ring-destructive">
+                                  Inactive
+                                </span>
+                              ) : null}
+                            </div>
                           </TableCell>
-                          <TableCell className="flex max-w-[250px] items-center gap-x-2 sm:min-w-[300px] md:min-w-[400px] lg:min-w-[450px]">
+                          <TableCell className="flex items-center gap-x-2 sm:min-w-[300px] md:min-w-[400px] lg:min-w-[450px]">
                             <div
                               className={cn(
                                 `group/cell relative flex w-full items-center gap-x-4 overflow-hidden truncate rounded-sm px-3 py-1.5 text-center text-secondary-foreground transition-all group-hover/row:ring-1 group-hover/row:ring-gray-400 group-hover/row:dark:ring-gray-100 md:py-1`,
@@ -242,10 +324,10 @@ export default function LinksTable({
                                 />
                               ) : null}
 
-                              <div className="flex w-full whitespace-nowrap text-xs group-hover/cell:opacity-0 md:text-sm">
+                              <div className="flex w-full whitespace-nowrap text-sm group-hover/cell:opacity-0">
                                 {link.domainId
                                   ? `https://${link.domainSlug}/${link.slug}`
-                                  : `https://${process.env.NEXT_PUBLIC_ROOT_DOMAIN}/view/${link.id}`}
+                                  : `${process.env.NEXT_PUBLIC_MARKETING_URL}/view/${link.id}`}
                               </div>
 
                               {link.domainId && hasFreePlan ? (
@@ -265,7 +347,7 @@ export default function LinksTable({
                                     handleCopyToClipboard(
                                       link.domainId
                                         ? `https://${link.domainSlug}/${link.slug}`
-                                        : `https://${process.env.NEXT_PUBLIC_ROOT_DOMAIN}/view/${link.id}`,
+                                        : `${process.env.NEXT_PUBLIC_MARKETING_URL}/view/${link.id}`,
                                     )
                                   }
                                   title="Copy to clipboard"
@@ -274,16 +356,29 @@ export default function LinksTable({
                                 </button>
                               )}
                             </div>
-                            <Button
-                              variant="link"
-                              size="icon"
-                              className="group h-7 w-8"
-                              onClick={() => handleEditLink(link)}
-                              title="Edit link"
-                            >
-                              <span className="sr-only">Edit link</span>
-                              <Settings2Icon className="h-5 w-5 text-gray-400 group-hover:text-gray-500" />
-                            </Button>
+                            <ButtonTooltip content="Preview link">
+                              <Button
+                                variant={"link"}
+                                size={"icon"}
+                                className="group h-7 w-8"
+                                onClick={() => handlePreviewLink(link)}
+                              >
+                                <span className="sr-only">Preview link</span>
+                                <EyeIcon className="h-5 w-5 text-gray-400 group-hover:text-gray-500" />
+                              </Button>
+                            </ButtonTooltip>
+                            <ButtonTooltip content="Edit link">
+                              <Button
+                                variant="link"
+                                size="icon"
+                                className="group h-7 w-8"
+                                onClick={() => handleEditLink(link)}
+                                title="Edit link"
+                              >
+                                <span className="sr-only">Edit link</span>
+                                <Settings2Icon className="h-5 w-5 text-gray-400 group-hover:text-gray-500" />
+                              </Button>
+                            </ButtonTooltip>
                           </TableCell>
                           <TableCell>
                             <CollapsibleTrigger
@@ -337,13 +432,32 @@ export default function LinksTable({
                                 <DropdownMenuItem
                                   onClick={() => handleEditLink(link)}
                                 >
+                                  <Settings2Icon className="mr-2 h-4 w-4" />
                                   Edit Link
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
+                                  disabled={!canAddLinks}
                                   onClick={() => handleDuplicateLink(link)}
                                 >
+                                  <CopyPlusIcon className="mr-2 h-4 w-4" />
                                   Duplicate Link
                                 </DropdownMenuItem>
+                                {features?.embedding ? (
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setSelectedEmbedLink({
+                                        id: link.id,
+                                        name:
+                                          link.name ||
+                                          `Link #${link.id.slice(-5)}`,
+                                      });
+                                      setEmbedModalOpen(true);
+                                    }}
+                                  >
+                                    <Code2Icon className="mr-2 h-4 w-4" />
+                                    Get Embed Code
+                                  </DropdownMenuItem>
+                                ) : null}
                                 <DropdownMenuItem
                                   className="text-destructive focus:bg-destructive focus:text-destructive-foreground"
                                   onClick={() =>
@@ -354,6 +468,7 @@ export default function LinksTable({
                                     )
                                   }
                                 >
+                                  <ArchiveIcon className="mr-2 h-4 w-4" />
                                   Archive
                                 </DropdownMenuItem>
                               </DropdownMenuContent>
@@ -371,17 +486,20 @@ export default function LinksTable({
                   ))
               ) : (
                 <TableRow>
-                  <TableCell className="min-w-[100px]">
-                    <Skeleton className="h-6 w-full" />
-                  </TableCell>
-                  <TableCell className="min-w-[450px]">
-                    <Skeleton className="h-6 w-full" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-6 w-24" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-6 w-24" />
+                  <TableCell colSpan={5}>
+                    <div className="flex w-full flex-col items-center justify-center gap-4 rounded-xl py-4">
+                      <div className="hidden rounded-full sm:block">
+                        <div
+                          className={cn(
+                            "rounded-full border border-white bg-gradient-to-t from-gray-100 p-1 md:p-3",
+                          )}
+                        >
+                          <LinkIcon className="size-6" />
+                        </div>
+                      </div>
+                      <p>No links found for this {targetType.toLowerCase()}</p>
+                      <AddLinkButton />
+                    </div>
                   </TableCell>
                 </TableRow>
               )}
@@ -393,9 +511,18 @@ export default function LinksTable({
           isOpen={isLinkSheetVisible}
           setIsOpen={setIsLinkSheetVisible}
           linkType={`${targetType}_LINK`}
-          currentLink={selectedLink}
+          currentLink={selectedLink.id ? selectedLink : undefined}
           existingLinks={links}
         />
+
+        {selectedEmbedLink && (
+          <EmbedCodeModal
+            isOpen={embedModalOpen}
+            setIsOpen={setEmbedModalOpen}
+            linkId={selectedEmbedLink.id}
+            linkName={selectedEmbedLink.name}
+          />
+        )}
 
         {archivedLinksCount > 0 && (
           <Collapsible asChild>
@@ -441,7 +568,7 @@ export default function LinksTable({
                                   <div className="flex items-center gap-x-4 whitespace-nowrap rounded-sm bg-secondary px-3 py-1.5 text-xs text-secondary-foreground sm:py-1 sm:text-sm">
                                     {link.domainId
                                       ? `https://${link.domainSlug}/${link.slug}`
-                                      : `https://${process.env.NEXT_PUBLIC_ROOT_DOMAIN}/view/${link.id}`}
+                                      : `${process.env.NEXT_PUBLIC_MARKETING_URL}/view/${link.id}`}
                                   </div>
                                 </TableCell>
                                 <TableCell>

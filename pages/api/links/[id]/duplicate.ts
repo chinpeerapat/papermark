@@ -1,5 +1,6 @@
 import { NextApiRequest, NextApiResponse } from "next";
 
+import { Prisma } from "@prisma/client";
 import { getServerSession } from "next-auth/next";
 
 import { errorhandler } from "@/lib/errorHandler";
@@ -19,7 +20,8 @@ export default async function handle(
       return res.status(401).end("Unauthorized");
     }
 
-    const { id, teamId } = req.query as { id: string; teamId: string };
+    const { id } = req.query as { id: string };
+    const { teamId } = req.body as { teamId: string };
 
     try {
       const team = await prisma.team.findUnique({
@@ -39,34 +41,23 @@ export default async function handle(
       }
 
       const link = await prisma.link.findUnique({
-        where: { id },
-        include: {
-          dataroom: {
-            select: {
-              teamId: true,
-            },
-          },
-          document: {
-            select: { teamId: true },
-          },
-        },
+        where: { id, teamId },
       });
 
       if (!link) {
         return res.status(404).json({ error: "Link not found" });
       }
 
-      const { dataroom, document, ...linkData } = link;
-
-      const newLinkName = linkData.name
-        ? linkData.name + " (Copy)"
-        : `Link #${linkData.id.slice(-5)} (Copy)`;
+      const newLinkName = link.name
+        ? link.name + " (Copy)"
+        : `Link #${link.id.slice(-5)} (Copy)`;
       const newLink = await prisma.link.create({
         data: {
-          ...linkData,
+          ...link,
           id: undefined,
-          slug: linkData.slug ? linkData.slug + "-copy" : null,
+          slug: link.slug ? link.slug + "-copy" : null,
           name: newLinkName,
+          watermarkConfig: link.watermarkConfig || Prisma.JsonNull,
           createdAt: undefined,
           updatedAt: undefined,
         },

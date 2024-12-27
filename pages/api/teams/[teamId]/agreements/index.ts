@@ -2,10 +2,8 @@ import { NextApiRequest, NextApiResponse } from "next";
 
 import { getServerSession } from "next-auth/next";
 
-import { addDomainToVercel, validDomainRegex } from "@/lib/domains";
 import { errorhandler } from "@/lib/errorHandler";
 import prisma from "@/lib/prisma";
-import { getTeamWithDomain } from "@/lib/team/helper";
 import { CustomUser } from "@/lib/types";
 import { log } from "@/lib/utils";
 
@@ -80,13 +78,18 @@ export default async function handle(
         return res.status(401).json("Unauthorized");
       }
 
-      const { name, link } = req.body as { name: string; link: string };
+      const { name, link, requireName } = req.body as {
+        name: string;
+        link: string;
+        requireName: boolean;
+      };
 
       const agreement = await prisma.agreement.create({
         data: {
           teamId,
           name,
           content: link,
+          requireName,
         },
       });
 

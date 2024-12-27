@@ -5,17 +5,22 @@ import { toast } from "sonner";
 import { mutate } from "swr";
 
 import { DataroomHeader } from "@/components/datarooms/dataroom-header";
+import { DataroomNavigation } from "@/components/datarooms/dataroom-navigation";
+import DeleteDataroom from "@/components/datarooms/settings/delete-dataroooom";
 import DuplicateDataroom from "@/components/datarooms/settings/duplicate-dataroom";
 import AppLayout from "@/components/layouts/app";
-import { NavMenu } from "@/components/navigation-menu";
 import { Form } from "@/components/ui/form";
 
+import { usePlan } from "@/lib/swr/use-billing";
 import { useDataroom } from "@/lib/swr/use-dataroom";
 
 export default function Settings() {
   const { dataroom } = useDataroom();
   const teamInfo = useTeam();
   const teamId = teamInfo?.currentTeam?.id;
+
+  const { plan } = usePlan();
+  const isDataroomsPlan = plan === "datarooms";
 
   if (!dataroom) {
     return <div>Loading...</div>;
@@ -31,35 +36,7 @@ export default function Settings() {
             actions={[]}
           />
 
-          <NavMenu
-            navigation={[
-              {
-                label: "Overview",
-                href: `/datarooms/${dataroom.id}`,
-                segment: `${dataroom.id}`,
-              },
-              {
-                label: "Documents",
-                href: `/datarooms/${dataroom.id}/documents`,
-                segment: "documents",
-              },
-              {
-                label: "Users",
-                href: `/datarooms/${dataroom.id}/users`,
-                segment: "users",
-              },
-              {
-                label: "Customization",
-                href: `/datarooms/${dataroom.id}/branding`,
-                segment: "branding",
-              },
-              {
-                label: "Settings",
-                href: `/datarooms/${dataroom.id}/settings`,
-                segment: "settings",
-              },
-            ]}
-          />
+          <DataroomNavigation dataroomId={dataroom.id} />
         </header>
 
         {/* Settings */}
@@ -85,14 +62,14 @@ export default function Settings() {
                 placeholder: "My Dataroom",
                 maxLength: 32,
               }}
-              helpText="Max 32 characters."
+              helpText="Max 32 characters"
               handleSubmit={(updateData) =>
                 fetch(`/api/teams/${teamId}/datarooms/${dataroom.id}`, {
                   method: "PATCH",
                   headers: {
                     "Content-Type": "application/json",
                   },
-                  body: JSON.stringify(updateData),
+                  body: JSON.stringify({ name: updateData.name.trim() }),
                 }).then(async (res) => {
                   if (res.status === 200) {
                     await Promise.all([
@@ -108,6 +85,12 @@ export default function Settings() {
               }
             />
             <DuplicateDataroom dataroomId={dataroom.id} teamId={teamId} />
+            {isDataroomsPlan ? (
+              <DeleteDataroom
+                dataroomId={dataroom.id}
+                dataroomName={dataroom.name}
+              />
+            ) : null}
             {/* <Card>
                   <CardHeader className="relative">
                     <CardTitle>Feedback Question</CardTitle>

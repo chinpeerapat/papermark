@@ -50,13 +50,6 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        {process.env.NEXT_PUBLIC_TOLT_REFERRAL_ID && (
-          <script
-            async
-            src="https://cdn.tolt.io/tolt.js"
-            data-tolt={process.env.NEXT_PUBLIC_TOLT_REFERRAL_ID}
-          />
-        )}
         <PlausibleProvider
           domain="docu.chn.one"
           enabled={process.env.NEXT_PUBLIC_VERCEL_ENV === "production"}

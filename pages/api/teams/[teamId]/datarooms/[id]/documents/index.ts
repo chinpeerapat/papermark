@@ -1,16 +1,22 @@
 import { NextApiRequest, NextApiResponse } from "next";
 
 import { authOptions } from "@/pages/api/auth/[...nextauth]";
-import { client } from "@/trigger";
-import { DataroomDocument, Document } from "@prisma/client";
-import slugify from "@sindresorhus/slugify";
+import { runs } from "@trigger.dev/sdk/v3";
+import { waitUntil } from "@vercel/functions";
 import { getServerSession } from "next-auth/next";
 
 import { errorhandler } from "@/lib/errorHandler";
-import { newId } from "@/lib/id-helper";
+import { getFeatureFlags } from "@/lib/featureFlags";
 import prisma from "@/lib/prisma";
+import { sendDataroomChangeNotificationTask } from "@/lib/trigger/dataroom-change-notification";
 import { CustomUser } from "@/lib/types";
 import { log } from "@/lib/utils";
+import { sortItemsByIndexAndName } from "@/lib/utils/sort-items-by-index-name";
+
+export const config = {
+  // in order to enable `waitUntil` function
+  supportsResponseStreaming: true,
+};
 
 export default async function handle(
   req: NextApiRequest,
@@ -51,11 +57,14 @@ export default async function handle(
           dataroomId: dataroomId,
           folderId: null,
         },
-        orderBy: {
-          document: {
-            name: "asc",
+        orderBy: [
+          { orderIndex: "asc" },
+          {
+            document: {
+              name: "asc",
+            },
           },
-        },
+        ],
         include: {
           document: {
             select: {
@@ -64,7 +73,7 @@ export default async function handle(
               type: true,
               _count: {
                 select: {
-                  views: { where: { viewType: "DATAROOM_VIEW" } },
+                  views: { where: { dataroomId } },
                   versions: true,
                 },
               },
@@ -73,30 +82,9 @@ export default async function handle(
         },
       });
 
-      const documentsWithCount = documents.map((document) => ({
-        ...document,
-        document: { ...document.document },
-      }));
+      const sortedDocuments = sortItemsByIndexAndName(documents);
 
-      // Sort documents by name considering the numerical part
-      documentsWithCount.sort((a, b) => {
-        const getNumber = (str: string): number => {
-          const match = str.match(/^\d+/);
-          return match ? parseInt(match[0], 10) : 0;
-        };
-
-        const numA = getNumber(a.document.name);
-        const numB = getNumber(b.document.name);
-
-        if (numA !== numB) {
-          return numA - numB;
-        }
-
-        // If numerical parts are the same, fall back to lexicographical order
-        return a.document.name.localeCompare(b.document.name);
-      });
-
-      return res.status(200).json(documentsWithCount);
+      return res.status(200).json(sortedDocuments);
     } catch (error) {
       console.error("Request error", error);
       return res
@@ -172,16 +160,41 @@ export default async function handle(
         },
       });
 
-      // trigger `dataroom.new_document` event to notify existing viewers
-      // await client.sendEvent({
-      //   name: "dataroom.new_document",
-      //   payload: {
-      //     dataroomId: dataroomId,
-      //     dataroomDocumentId: document.id,
-      //     linkId: document.dataroom.links[0].id ?? "",
-      //     senderUserId: userId,
-      //   },
-      // });
+      // Check if the team has the change notification feature flag enabled
+      const featureFlags = await getFeatureFlags({ teamId });
+
+      if (featureFlags.roomChangeNotifications) {
+        // Get all delayed and queued runs for this dataroom
+        const allRuns = await runs.list({
+          taskIdentifier: ["send-dataroom-change-notification"],
+          tag: [`dataroom_${dataroomId}`],
+          status: ["DELAYED", "QUEUED"],
+          period: "10m",
+        });
+
+        // Cancel any existing unsent notification runs for this dataroom
+        await Promise.all(allRuns.data.map((run) => runs.cancel(run.id)));
+
+        waitUntil(
+          sendDataroomChangeNotificationTask.trigger(
+            {
+              dataroomId,
+              dataroomDocumentId: document.id,
+              senderUserId: userId,
+              teamId,
+            },
+            {
+              idempotencyKey: `dataroom-notification-${teamId}-${dataroomId}-${document.id}`,
+              tags: [
+                `team_${teamId}`,
+                `dataroom_${dataroomId}`,
+                `document_${document.id}`,
+              ],
+              delay: new Date(Date.now() + 10 * 60 * 1000), // 10 minute delay
+            },
+          ),
+        );
+      }
 
       return res.status(201).json(document);
     } catch (error) {
@@ -193,7 +206,7 @@ export default async function handle(
     }
   } else {
     // We only allow GET requests
-    res.setHeader("Allow", ["GET"]);
+    res.setHeader("Allow", ["GET", "POST"]);
     return res.status(405).end(`Method ${req.method} Not Allowed`);
   }
 }

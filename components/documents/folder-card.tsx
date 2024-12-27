@@ -1,9 +1,16 @@
-import Link from "next/link";
+import { useRouter } from "next/router";
 
 import { useEffect, useRef, useState } from "react";
 
 import { TeamContextType } from "@/context/team-context";
-import { FolderIcon, MoreVertical, TrashIcon } from "lucide-react";
+import {
+  BetweenHorizontalStartIcon,
+  FolderIcon,
+  FolderPenIcon,
+  MoreVertical,
+  PackagePlusIcon,
+  TrashIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { mutate } from "swr";
 
@@ -22,22 +29,30 @@ import { FolderWithCount } from "@/lib/swr/use-documents";
 import { timeAgo } from "@/lib/utils";
 
 import { EditFolderModal } from "../folders/edit-folder-modal";
+import { AddFolderToDataroomModal } from "./add-folder-to-dataroom-modal";
+import { DeleteFolderModal } from "./delete-folder-modal";
 
 type FolderCardProps = {
   folder: FolderWithCount | DataroomFolderWithCount;
   teamInfo: TeamContextType | null;
   isDataroom?: boolean;
   dataroomId?: string;
+  isDragging?: boolean;
+  isOver?: boolean;
 };
 export default function FolderCard({
   folder,
   teamInfo,
   isDataroom,
   dataroomId,
+  isDragging,
+  isOver,
 }: FolderCardProps) {
+  const router = useRouter();
   const [openFolder, setOpenFolder] = useState<boolean>(false);
-  const [isFirstClick, setIsFirstClick] = useState<boolean>(false);
   const [menuOpen, setMenuOpen] = useState<boolean>(false);
+  const [addDataroomOpen, setAddDataroomOpen] = useState<boolean>(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState<boolean>(false);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
 
   const folderPath =
@@ -49,40 +64,25 @@ export default function FolderCard({
     folder.path.lastIndexOf("/"),
   );
 
+  // https://github.com/radix-ui/primitives/issues/1241#issuecomment-1888232392
   useEffect(() => {
-    function handleClickOutside(event: { target: any }) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setMenuOpen(false);
-        setIsFirstClick(false);
-      }
+    if (!openFolder || !addDataroomOpen || !deleteModalOpen) {
+      setTimeout(() => {
+        document.body.style.pointerEvents = "";
+      });
     }
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, []);
+  }, [openFolder, addDataroomOpen, deleteModalOpen]);
 
   const handleButtonClick = (event: any, documentId: string) => {
     event.stopPropagation();
     event.preventDefault();
 
-    if (isFirstClick) {
-      handleDeleteFolder(documentId);
-      setIsFirstClick(false);
-      setMenuOpen(false); // Close the dropdown after deleting
-    } else {
-      setIsFirstClick(true);
-    }
+    setDeleteModalOpen(false);
+    handleDeleteFolder(documentId);
+    setMenuOpen(false);
   };
 
   const handleDeleteFolder = async (folderId: string) => {
-    // Prevent the first click from deleting the document
-    if (!isFirstClick) {
-      setIsFirstClick(true);
-      return;
-    }
-
     const endpointTargetType =
       isDataroom && dataroomId ? `datarooms/${dataroomId}/folders` : "folders";
 
@@ -94,7 +94,7 @@ export default function FolderCard({
         },
       ),
       {
-        loading: "Deleting folder...",
+        loading: isDataroom ? "Removing folder..." : "Deleting folder...",
         success: () => {
           mutate(
             `/api/teams/${teamInfo?.currentTeam?.id}/${endpointTargetType}?root=true`,
@@ -105,26 +105,15 @@ export default function FolderCard({
           mutate(
             `/api/teams/${teamInfo?.currentTeam?.id}/${endpointTargetType}${parentFolderPath}`,
           );
-          return "Folder deleted successfully.";
+          return isDataroom
+            ? "Folder removed successfully."
+            : `Folder deleted successfully with ${folder._count.documents} documents and ${folder._count.childFolders} folders`;
         },
-        error: "Failed to delete folder. Move documents first.",
+        error: isDataroom
+          ? "Failed to remove folder."
+          : "Failed to delete folder. Move documents first.",
       },
     );
-  };
-
-  const handleMenuStateChange = (open: boolean) => {
-    if (isFirstClick) {
-      setMenuOpen(true); // Keep the dropdown open on the first click
-      return;
-    }
-
-    // If the menu is closed, reset the isFirstClick state
-    if (!open) {
-      setIsFirstClick(false);
-      setMenuOpen(false); // Ensure the dropdown is closed
-    } else {
-      setMenuOpen(true); // Open the dropdown
-    }
   };
 
   const handleCreateDataroom = (e: any, folderId: string) => {
@@ -155,21 +144,30 @@ export default function FolderCard({
     );
   };
 
+  const handleCardClick = (e: React.MouseEvent) => {
+    if (isDragging) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    router.push(folderPath);
+  };
+
   return (
     <>
-      <li className="group/row relative flex items-center justify-between rounded-lg border-0 p-3 ring-1 ring-gray-400 transition-all hover:bg-secondary hover:ring-gray-500 dark:bg-secondary dark:ring-gray-500 hover:dark:ring-gray-400 sm:p-4">
+      <div
+        onClick={handleCardClick}
+        className="group/row relative flex items-center justify-between rounded-lg border-0 bg-white p-3 ring-1 ring-gray-400 transition-all hover:bg-secondary hover:ring-gray-500 dark:bg-secondary dark:ring-gray-500 hover:dark:ring-gray-400 sm:p-4"
+      >
         <div className="flex min-w-0 shrink items-center space-x-2 sm:space-x-4">
           <div className="mx-0.5 flex w-8 items-center justify-center text-center sm:mx-1">
-            <FolderIcon className="h-8 w-8 " strokeWidth={1} />
+            <FolderIcon className="h-8 w-8" strokeWidth={1} />
           </div>
 
           <div className="flex-col">
             <div className="flex items-center">
               <h2 className="min-w-0 max-w-[150px] truncate text-sm font-semibold leading-6 text-foreground sm:max-w-md">
-                <Link href={`${folderPath}`} className="w-full truncate">
-                  <span>{folder.name}</span>
-                  <span className="absolute inset-0" />
-                </Link>
+                {folder.name}
               </h2>
             </div>
             <div className="mt-1 flex items-center space-x-1 text-xs leading-5 text-muted-foreground">
@@ -196,14 +194,14 @@ export default function FolderCard({
           href={`/documents/${prismaDocument.id}`}
           className="flex items-center z-10 space-x-1 rounded-md bg-gray-200 dark:bg-gray-700 px-1.5 sm:px-2 py-0.5 transition-all duration-75 hover:scale-105 active:scale-100"
         >
-          <BarChart className="h-3 sm:h-4 w-3 sm:w-4 text-muted-foreground" />
-          <p className="whitespace-nowrap text-xs sm:text-sm text-muted-foreground">
+          <BarChart className="w-3 h-3 sm:h-4 sm:w-4 text-muted-foreground" />
+          <p className="text-xs whitespace-nowrap sm:text-sm text-muted-foreground">
             {nFormatter(prismaDocument._count.views)}
-            <span className="ml-1 hidden sm:inline-block">views</span>
+            <span className="hidden ml-1 sm:inline-block">views</span>
           </p>
         </Link> */}
 
-          <DropdownMenu open={menuOpen} onOpenChange={handleMenuStateChange}>
+          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
             <DropdownMenuTrigger asChild>
               <Button
                 // size="icon"
@@ -216,34 +214,62 @@ export default function FolderCard({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" ref={dropdownRef}>
               <DropdownMenuLabel>Actions</DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => setOpenFolder(true)}>
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setOpenFolder(true);
+                }}
+              >
+                <FolderPenIcon className="mr-2 h-4 w-4" />
                 Rename
               </DropdownMenuItem>
               {!isDataroom ? (
                 <DropdownMenuItem
                   onClick={(e) => handleCreateDataroom(e, folder.id)}
                 >
+                  <PackagePlusIcon className="mr-2 h-4 w-4" />
                   Create dataroom from folder
                 </DropdownMenuItem>
               ) : null}
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setAddDataroomOpen(true);
+                }}
+              >
+                <BetweenHorizontalStartIcon className="mr-2 h-4 w-4" />
+                {isDataroom
+                  ? "Copy folder to other dataroom"
+                  : "Add folder to dataroom"}
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
 
               <DropdownMenuItem
-                onClick={(event) => handleButtonClick(event, folder.id)}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setDeleteModalOpen(true);
+                }}
                 className="text-destructive duration-200 focus:bg-destructive focus:text-destructive-foreground"
               >
-                {isFirstClick ? (
-                  "Really delete?"
-                ) : (
-                  <>
-                    <TrashIcon className="mr-2 h-4 w-4" /> Delete Folder
-                  </>
-                )}
+                <TrashIcon className="mr-2 h-4 w-4" />{" "}
+                {isDataroom ? "Remove Folder" : "Delete Folder"}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-      </li>
+        {/* only used for drag and drop */}
+        {isOver && !isDragging && (
+          <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black bg-opacity-20 dark:bg-white dark:bg-opacity-20">
+            <span className="font-semibold text-black dark:text-gray-100">
+              Drop to move
+            </span>
+          </div>
+        )}
+      </div>
+
       {openFolder ? (
         <EditFolderModal
           open={openFolder}
@@ -252,6 +278,27 @@ export default function FolderCard({
           name={folder.name}
           isDataroom={isDataroom}
           dataroomId={dataroomId}
+        />
+      ) : null}
+      {addDataroomOpen ? (
+        <AddFolderToDataroomModal
+          open={addDataroomOpen}
+          setOpen={setAddDataroomOpen}
+          folderId={folder.id}
+          folderName={folder.name}
+          dataroomId={dataroomId}
+        />
+      ) : null}
+      {deleteModalOpen ? (
+        <DeleteFolderModal
+          folderId={folder.id}
+          open={deleteModalOpen}
+          setOpen={setDeleteModalOpen}
+          folderName={folder.name}
+          documents={folder._count.documents}
+          childFolders={folder._count.childFolders}
+          isDataroom={isDataroom}
+          handleButtonClick={handleButtonClick}
         />
       ) : null}
     </>

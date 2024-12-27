@@ -1,11 +1,15 @@
+import { useTeam } from "@/context/team-context";
 import {
   BadgeCheckIcon,
   BadgeInfoIcon,
+  DownloadCloudIcon,
   FileBadgeIcon,
   MailOpenIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import ChevronDown from "@/components/shared/icons/chevron-down";
+import { Button } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -25,6 +29,7 @@ import { BadgeTooltip } from "@/components/ui/tooltip";
 import { useDataroomVisits } from "@/lib/swr/use-dataroom";
 import { durationFormat, timeAgo } from "@/lib/utils";
 
+import { DataroomVisitorUserAgent } from "./dataroom-visitor-useragent";
 import DataroomVisitHistory from "./dataroom-visitors-history";
 import { VisitorAvatar } from "./visitor-avatar";
 
@@ -33,12 +38,52 @@ export default function DataroomVisitorsTable({
 }: {
   dataroomId: string;
 }) {
+  const teamInfo = useTeam();
+  const teamId = teamInfo?.currentTeam?.id;
   const { views } = useDataroomVisits({ dataroomId });
+
+  const exportVisitCounts = async (dataroomId: string) => {
+    const formattedTime = new Date().toISOString().replace(/[-:Z]/g, "");
+    try {
+      const response = await fetch(
+        `/api/teams/${teamId}/datarooms/${dataroomId}/export-visits`,
+        { method: "GET" },
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+
+      // Create blob and download
+      const blob = new Blob([data.visits], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute(
+        "download",
+        `${data.dataroomName}_visits_${formattedTime}.csv`,
+      );
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast.success("CSV file downloaded successfully");
+    } catch (error) {
+      console.error("Error:", error);
+      toast.error(
+        "An error occurred while downloading the CSV. Please try again.",
+      );
+    }
+  };
 
   return (
     <div className="w-full">
-      <div>
+      <div className="flex justify-between">
         <h2 className="mb-2 md:mb-4">All visitors</h2>
+        <Button size="sm" onClick={() => exportVisitCounts(dataroomId)}>
+          Export visits
+        </Button>
       </div>
       <div className="rounded-md border">
         <Table>
@@ -90,6 +135,14 @@ export default function DataroomVisitorsTable({
                                         key="internal"
                                       >
                                         <BadgeInfoIcon className="h-4 w-4 text-blue-500 hover:text-blue-600" />
+                                      </BadgeTooltip>
+                                    )}
+                                    {view.downloadedAt && (
+                                      <BadgeTooltip
+                                        content={`Downloaded ${timeAgo(view.downloadedAt)}`}
+                                        key="download"
+                                      >
+                                        <DownloadCloudIcon className="h-4 w-4 text-cyan-500 hover:text-cyan-600" />
                                       </BadgeTooltip>
                                     )}
                                     {view.agreementResponse && (
@@ -146,6 +199,11 @@ export default function DataroomVisitorsTable({
 
                     <CollapsibleContent asChild>
                       <>
+                        <TableRow>
+                          <TableCell colSpan={3}>
+                            <DataroomVisitorUserAgent viewId={view.id} />
+                          </TableCell>
+                        </TableRow>
                         <TableRow key={view.id}>
                           <TableCell>
                             <div className="flex items-center gap-x-4 overflow-visible">
@@ -169,6 +227,34 @@ export default function DataroomVisitorsTable({
                           </TableCell>
                           <TableCell className="table-cell"></TableCell>
                         </TableRow>
+
+                        {view.downloadedAt ? (
+                          <TableRow key={view.id + 1}>
+                            <TableCell>
+                              <div className="flex items-center gap-x-4 overflow-visible">
+                                <DownloadCloudIcon className="h-5 w-5 text-cyan-500 hover:text-cyan-600" />
+                                Downloaded {view.dataroomName} dataroom
+                              </div>
+                            </TableCell>
+
+                            <TableCell>
+                              <div>
+                                <time
+                                  className="truncate text-sm text-muted-foreground"
+                                  dateTime={new Date(
+                                    view.downloadedAt,
+                                  ).toLocaleString()}
+                                  title={new Date(
+                                    view.downloadedAt,
+                                  ).toLocaleString()}
+                                >
+                                  {timeAgo(view.downloadedAt)}
+                                </time>
+                              </div>
+                            </TableCell>
+                            <TableCell className="table-cell"></TableCell>
+                          </TableRow>
+                        ) : null}
 
                         <DataroomVisitHistory
                           viewId={view.id}

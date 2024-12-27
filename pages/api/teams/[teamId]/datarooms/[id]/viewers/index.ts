@@ -30,9 +30,7 @@ export default async function handle(
         where: {
           id: teamId,
           users: {
-            some: {
-              userId: (session.user as CustomUser).id,
-            },
+            some: { userId },
           },
         },
         select: {
@@ -44,37 +42,40 @@ export default async function handle(
         return res.status(403).end("Unauthorized to access this team");
       }
 
+      const viewers = await prisma.viewer.findMany({
+        where: {
+          teamId: teamId,
+          views: {
+            some: {
+              dataroomId: dataroomId,
+              viewType: "DATAROOM_VIEW",
+            },
+          },
+        },
+        select: {
+          id: true,
+          teamId: true,
+          email: true,
+          verified: true,
+          views: {
+            where: {
+              dataroomId: dataroomId,
+              viewType: "DATAROOM_VIEW",
+            },
+            orderBy: {
+              viewedAt: "desc",
+            },
+          },
+        },
+      });
+
       const dataroom = await prisma.dataroom.findUnique({
         where: {
           id: dataroomId,
           teamId: teamId,
         },
         select: {
-          id: true,
-          teamId: true,
           name: true,
-          viewers: {
-            orderBy: {
-              createdAt: "desc",
-            },
-            include: {
-              views: {
-                where: {
-                  viewType: "DATAROOM_VIEW",
-                },
-                orderBy: {
-                  viewedAt: "desc",
-                },
-                include: {
-                  link: {
-                    select: {
-                      name: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
         },
       });
 
@@ -91,8 +92,6 @@ export default async function handle(
         },
       });
 
-      const viewers = dataroom?.viewers || [];
-
       const returnViews = viewers.map((viewer) => {
         return {
           ...viewer,
@@ -106,7 +105,7 @@ export default async function handle(
       return res.status(200).json(returnViews);
     } catch (error) {
       log({
-        message: `Failed to get views for dataroom: _${dataroomId}_. \n\n ${error} \n\n*Metadata*: \`{teamId: ${teamId}, userId: ${userId}}\``,
+        message: `Failed to get viewers for dataroom: _${dataroomId}_. \n\n ${error} \n\n*Metadata*: \`{teamId: ${teamId}, userId: ${userId}}\``,
         type: "error",
       });
       errorhandler(error, res);

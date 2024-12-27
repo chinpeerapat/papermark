@@ -1,15 +1,15 @@
 import { NextApiRequest, NextApiResponse } from "next";
 
+import { LinkAudienceType } from "@prisma/client";
 import { getServerSession } from "next-auth/next";
 
 import { errorhandler } from "@/lib/errorHandler";
 import prisma from "@/lib/prisma";
-import {
-  getDocumentWithTeamAndUser,
-  getTeamWithUsersAndDocument,
-} from "@/lib/team/helper";
 import { CustomUser } from "@/lib/types";
-import { generateEncrpytedPassword } from "@/lib/utils";
+import {
+  decryptEncrpytedPassword,
+  generateEncrpytedPassword,
+} from "@/lib/utils";
 
 import { authOptions } from "../auth/[...nextauth]";
 
@@ -24,8 +24,14 @@ export default async function handler(
       return res.status(401).end("Unauthorized");
     }
 
-    const { targetId, linkType, password, expiresAt, ...linkDomainData } =
-      req.body;
+    const {
+      targetId,
+      linkType,
+      password,
+      expiresAt,
+      teamId,
+      ...linkDomainData
+    } = req.body;
 
     const userId = (session.user as CustomUser).id;
 
@@ -33,43 +39,17 @@ export default async function handler(
     const documentLink = linkType === "DOCUMENT_LINK";
 
     try {
-      if (documentLink) {
-        // check if the the team that own the document has the current user
-        await getDocumentWithTeamAndUser({
-          docId: targetId,
-          userId,
-          options: {
-            team: {
-              select: {
-                users: {
-                  select: {
-                    userId: true,
-                  },
-                },
-              },
-            },
+      const team = await prisma.team.findUnique({
+        where: {
+          id: teamId,
+          users: {
+            some: { userId },
           },
-        });
-      }
+        },
+      });
 
-      if (dataroomLink) {
-        const dataroom = await prisma.dataroom.findUnique({
-          where: {
-            id: targetId,
-            team: {
-              users: {
-                some: {
-                  userId: userId,
-                },
-              },
-            },
-          },
-          select: { id: true },
-        });
-
-        if (!dataroom) {
-          return res.status(400).json({ error: "Dataroom not found." });
-        }
+      if (!team) {
+        return res.status(400).json({ error: "Team not found." });
       }
 
       const hashedPassword =
@@ -121,15 +101,28 @@ export default async function handler(
         });
       }
 
+      if (
+        linkData.audienceType === LinkAudienceType.GROUP &&
+        !linkData.groupId
+      ) {
+        return res.status(400).json({
+          error: "No group selected.",
+        });
+      }
+
       // Fetch the link and its related document from the database
       const link = await prisma.link.create({
         data: {
           documentId: documentLink ? targetId : null,
           dataroomId: dataroomLink ? targetId : null,
           linkType,
+          teamId,
           password: hashedPassword,
           name: linkData.name || null,
-          emailProtected: linkData.emailProtected,
+          emailProtected:
+            linkData.audienceType === LinkAudienceType.GROUP
+              ? true
+              : linkData.emailProtected,
           emailAuthenticated: linkData.emailAuthenticated,
           expiresAt: exat,
           allowDownload: linkData.allowDownload,
@@ -139,12 +132,19 @@ export default async function handler(
           enableNotification: linkData.enableNotification,
           enableFeedback: linkData.enableFeedback,
           enableScreenshotProtection: linkData.enableScreenshotProtection,
+          screenShieldPercentage: linkData.screenShieldPercentage,
           enableCustomMetatag: linkData.enableCustomMetatag,
           metaTitle: linkData.metaTitle || null,
           metaDescription: linkData.metaDescription || null,
           metaImage: linkData.metaImage || null,
+          metaFavicon: linkData.metaFavicon || null,
           allowList: linkData.allowList,
           denyList: linkData.denyList,
+          audienceType: linkData.audienceType,
+          groupId:
+            linkData.audienceType === LinkAudienceType.GROUP
+              ? linkData.groupId
+              : null,
           ...(linkData.enableQuestion && {
             enableQuestion: linkData.enableQuestion,
             feedback: {
@@ -160,6 +160,11 @@ export default async function handler(
             enableAgreement: linkData.enableAgreement,
             agreementId: linkData.agreementId,
           }),
+          ...(linkData.enableWatermark && {
+            enableWatermark: linkData.enableWatermark,
+            watermarkConfig: linkData.watermarkConfig,
+          }),
+          showBanner: linkData.showBanner,
         },
       });
 
@@ -171,6 +176,11 @@ export default async function handler(
 
       if (!linkWithView) {
         return res.status(404).json({ error: "Link not found" });
+      }
+
+      // Decrypt the password for the new link
+      if (linkWithView.password !== null) {
+        linkWithView.password = decryptEncrpytedPassword(linkWithView.password);
       }
 
       return res.status(200).json(linkWithView);

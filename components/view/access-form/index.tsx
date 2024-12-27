@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { Brand, DataroomBrand } from "@prisma/client";
 
@@ -35,9 +35,13 @@ export default function AccessForm({
   requireEmail,
   requirePassword,
   requireAgreement,
+  agreementName,
   agreementContent,
+  requireName,
   isLoading,
   linkId,
+  disableEditEmail,
+  useCustomAccessForm,
 }: {
   data: DEFAULT_ACCESS_FORM_TYPE;
   email: string | null | undefined;
@@ -47,10 +51,16 @@ export default function AccessForm({
   requireEmail: boolean;
   requirePassword: boolean;
   requireAgreement?: boolean;
+  agreementName?: string;
   agreementContent?: string;
+  requireName?: boolean;
   isLoading: boolean;
   linkId?: string;
+  disableEditEmail?: boolean;
+  useCustomAccessForm?: boolean;
 }) {
+  const [isEmailValid, setIsEmailValid] = useState(true);
+
   useEffect(() => {
     const userEmail = email;
     if (userEmail) {
@@ -61,7 +71,16 @@ export default function AccessForm({
     }
   }, [email]);
 
-  console.log("brand", brand);
+  const isFormValid = () => {
+    if (requireEmail) {
+      if (!data.email || !isEmailValid) return false;
+    }
+    if (requirePassword && !data.password) return false;
+    if (requireAgreement && !data.hasConfirmedAgreement) return false;
+    if (requireAgreement && requireName && !data.name) return false;
+    return true;
+  };
+
   return (
     <div
       className="flex h-dvh flex-col justify-between pb-4 pt-12"
@@ -110,31 +129,33 @@ export default function AccessForm({
 
         <div className="mt-10 sm:mx-auto sm:w-full sm:max-w-md">
           <form className="space-y-4" onSubmit={onSubmitHandler}>
-            {requireAgreement && agreementContent ? (
+            {requireAgreement && agreementContent && requireName ? (
               <NameSection {...{ data, setData, brand }} />
             ) : null}
             {requireEmail ? (
-              <EmailSection {...{ data, setData, brand }} />
+              <EmailSection
+                {...{ data, setData, brand }}
+                disableEditEmail={disableEditEmail}
+                useCustomAccessForm={useCustomAccessForm}
+                onValidationChange={setIsEmailValid}
+              />
             ) : null}
             {requirePassword ? (
               <PasswordSection {...{ data, setData, brand }} />
             ) : null}
-            {requireAgreement && agreementContent ? (
+            {requireAgreement && agreementContent && agreementName ? (
               <AgreementSection
                 {...{ data, setData, brand }}
                 agreementContent={agreementContent}
+                agreementName={agreementName}
+                useCustomAccessForm={useCustomAccessForm}
               />
             ) : null}
 
             <div className="flex justify-center">
               <Button
                 type="submit"
-                disabled={
-                  (requireEmail && !data.email) ||
-                  (requirePassword && !data.password) ||
-                  (requireAgreement && !data.hasConfirmedAgreement) ||
-                  (requireAgreement && !data.name)
-                }
+                disabled={!isFormValid()}
                 className="w-1/3 min-w-fit bg-white text-gray-950 hover:bg-white/90"
                 loading={isLoading}
                 style={{
@@ -153,14 +174,16 @@ export default function AccessForm({
           </form>
         </div>
       </div>
-      <div className="flex justify-center">
-        <p className="text-sm leading-9 tracking-tight text-gray-500">
-          <a href="/" target="_blank" rel="noopener noreferrer">
-            This document is securely shared with you using{" "}
-            <span className="font-semibold">Papermark</span>
-          </a>
-        </p>
-      </div>
+      {!useCustomAccessForm ? (
+        <div className="flex justify-center">
+          <p className="text-sm leading-9 tracking-tight text-gray-500">
+            <a href="/" target="_blank" rel="noopener noreferrer">
+              This document is securely shared with you using{" "}
+              <span className="font-semibold">Papermark</span>
+            </a>
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }

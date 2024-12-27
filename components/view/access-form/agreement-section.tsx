@@ -1,4 +1,4 @@
-import { Dispatch, SetStateAction, useEffect } from "react";
+import { Dispatch, SetStateAction } from "react";
 
 import { Brand, DataroomBrand } from "@prisma/client";
 
@@ -12,12 +12,16 @@ export default function AgreementSection({
   data,
   setData,
   agreementContent,
+  agreementName,
   brand,
+  useCustomAccessForm,
 }: {
   data: DEFAULT_ACCESS_FORM_TYPE;
   setData: Dispatch<SetStateAction<DEFAULT_ACCESS_FORM_TYPE>>;
   agreementContent: string;
+  agreementName: string;
   brand?: Partial<Brand> | Partial<DataroomBrand> | null;
+  useCustomAccessForm?: boolean;
 }) {
   const handleCheckChange = (checked: boolean) => {
     setData((prevData) => ({ ...prevData, hasConfirmedAgreement: checked }));
@@ -25,7 +29,7 @@ export default function AgreementSection({
 
   return (
     <div className="pb-5">
-      <div className="relative flex items-start space-x-2 rounded-md shadow-sm">
+      <div className="relative flex items-start space-x-2">
         <Checkbox
           id="agreement"
           onCheckedChange={handleCheckChange}
@@ -53,7 +57,7 @@ export default function AgreementSection({
                   : "white",
             }}
           >
-            Non-Disclosure Agreement
+            {agreementName}
           </a>
           .
         </label>

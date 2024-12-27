@@ -16,10 +16,12 @@ import {
 export default function ViewedDocument({
   documentId = "123",
   documentName = "Pitchdeck",
+  linkName = "Pitchdeck",
   viewerEmail,
 }: {
   documentId: string;
   documentName: string;
+  linkName: string;
   viewerEmail: string | null;
 }) {
   return (
@@ -41,8 +43,8 @@ export default function ViewedDocument({
               viewed by{" "}
               <span className="font-semibold">
                 {viewerEmail ? `${viewerEmail}` : `someone`}
-              </span>
-              .
+              </span>{" "}
+              from the link <span className="font-semibold">{linkName}</span>.
             </Text>
             <Text className="text-sm leading-6 text-black">
               You can get the detailed engagement insights like time-spent per
@@ -51,7 +53,7 @@ export default function ViewedDocument({
             <Section className="my-8 text-center">
               <Button
                 className="rounded bg-black text-center text-xs font-semibold text-white no-underline"
-                href={`https://www.papermark.io/documents/${documentId}`}
+                href={`https://app.papermark.io/documents/${documentId}`}
                 style={{ padding: "12px 20px" }}
               >
                 See my document insights

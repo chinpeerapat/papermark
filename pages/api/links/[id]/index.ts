@@ -1,16 +1,18 @@
 import { NextApiRequest, NextApiResponse } from "next";
 
-import {
-  Brand,
-  DataroomBrand,
-  DataroomDocument,
-  Document,
-} from "@prisma/client";
+import { Brand, DataroomBrand, LinkAudienceType } from "@prisma/client";
 import { getServerSession } from "next-auth/next";
 
+import {
+  fetchDataroomLinkData,
+  fetchDocumentLinkData,
+} from "@/lib/api/links/link-data";
 import prisma from "@/lib/prisma";
 import { CustomUser } from "@/lib/types";
-import { generateEncrpytedPassword } from "@/lib/utils";
+import {
+  decryptEncrpytedPassword,
+  generateEncrpytedPassword,
+} from "@/lib/utils";
 
 import { authOptions } from "../../auth/[...nextauth]";
 
@@ -36,12 +38,14 @@ export default async function handle(
           allowDownload: true,
           enableFeedback: true,
           enableScreenshotProtection: true,
+          screenShieldPercentage: true,
           password: true,
           isArchived: true,
           enableCustomMetatag: true,
           metaTitle: true,
           metaDescription: true,
           metaImage: true,
+          metaFavicon: true,
           enableQuestion: true,
           linkType: true,
           feedback: {
@@ -52,6 +56,12 @@ export default async function handle(
           },
           enableAgreement: true,
           agreement: true,
+          showBanner: true,
+          enableWatermark: true,
+          watermarkConfig: true,
+          groupId: true,
+          audienceType: true,
+          teamId: true,
         },
       });
 
@@ -71,130 +81,23 @@ export default async function handle(
       let linkData: any;
 
       if (linkType === "DOCUMENT_LINK") {
-        linkData = await prisma.link.findUnique({
-          where: { id: id },
-          select: {
-            document: {
-              select: {
-                id: true,
-                name: true,
-                assistantEnabled: true,
-                teamId: true,
-                ownerId: true,
-                team: {
-                  select: {
-                    plan: true,
-                  },
-                },
-                versions: {
-                  where: { isPrimary: true },
-                  select: {
-                    id: true,
-                    versionNumber: true,
-                    type: true,
-                    hasPages: true,
-                    file: true,
-                    isVertical: true,
-                  },
-                  take: 1,
-                },
-              },
-            },
-          },
+        const data = await fetchDocumentLinkData({
+          linkId: id,
+          teamId: link.teamId!,
         });
-
-        brand = await prisma.brand.findFirst({
-          where: {
-            teamId: linkData.document.teamId,
-          },
-          select: {
-            logo: true,
-            brandColor: true,
-            accentColor: true,
-          },
-        });
+        linkData = data.linkData;
+        brand = data.brand;
       } else if (linkType === "DATAROOM_LINK") {
-        linkData = await prisma.link.findUnique({
-          where: { id: id },
-          select: {
-            dataroom: {
-              select: {
-                id: true,
-                name: true,
-                teamId: true,
-                documents: {
-                  select: {
-                    id: true,
-                    folderId: true,
-                    updatedAt: true,
-                    document: {
-                      select: {
-                        id: true,
-                        name: true,
-                        versions: {
-                          where: { isPrimary: true },
-                          select: {
-                            id: true,
-                            versionNumber: true,
-                            type: true,
-                            hasPages: true,
-                            file: true,
-                            isVertical: true,
-                          },
-                          take: 1,
-                        },
-                      },
-                    },
-                  },
-                  orderBy: {
-                    document: {
-                      name: "asc",
-                    },
-                  },
-                },
-                folders: {
-                  orderBy: {
-                    name: "asc",
-                  },
-                },
-              },
-            },
-          },
+        const data = await fetchDataroomLinkData({
+          linkId: id,
+          teamId: link.teamId!,
+          ...(link.audienceType === LinkAudienceType.GROUP &&
+            link.groupId && {
+              groupId: link.groupId,
+            }),
         });
-
-        // Sort documents by name considering the numerical part
-        linkData.dataroom.documents.sort(
-          (
-            a: DataroomDocument & { document: Document },
-            b: DataroomDocument & { document: Document },
-          ) => {
-            const getNumber = (str: string): number => {
-              const match = str.match(/^\d+/);
-              return match ? parseInt(match[0], 10) : 0;
-            };
-
-            const numA = getNumber(a.document.name);
-            const numB = getNumber(b.document.name);
-
-            if (numA !== numB) {
-              return numA - numB;
-            }
-
-            // If numerical parts are the same, fall back to lexicographical order
-            return a.document.name.localeCompare(b.document.name);
-          },
-        );
-
-        brand = await prisma.dataroomBrand.findFirst({
-          where: {
-            dataroomId: linkData.dataroom.id,
-          },
-          select: {
-            logo: true,
-            banner: true,
-            brandColor: true,
-          },
-        });
+        linkData = data.linkData;
+        brand = data.brand;
       }
 
       const returnLink = {
@@ -216,12 +119,44 @@ export default async function handle(
       return res.status(401).end("Unauthorized");
     }
 
+    const userId = (session.user as CustomUser).id;
     const { id } = req.query as { id: string };
-    const { targetId, linkType, password, expiresAt, ...linkDomainData } =
-      req.body;
+    const {
+      targetId,
+      linkType,
+      password,
+      expiresAt,
+      teamId,
+      ...linkDomainData
+    } = req.body;
 
     const dataroomLink = linkType === "DATAROOM_LINK";
     const documentLink = linkType === "DOCUMENT_LINK";
+
+    try {
+      const existingLink = await prisma.link.findUnique({
+        where: {
+          id: id,
+          teamId: teamId,
+          team: {
+            users: {
+              some: { userId },
+            },
+          },
+        },
+      });
+
+      if (!existingLink) {
+        return res
+          .status(404)
+          .json({ error: "Link not found or unauthorized" });
+      }
+    } catch (error) {
+      return res.status(500).json({
+        message: "Internal Server Error",
+        error: (error as Error).message,
+      });
+    }
 
     const hashedPassword =
       password && password.length > 0
@@ -286,13 +221,16 @@ export default async function handle(
 
     // Update the link in the database
     const updatedLink = await prisma.link.update({
-      where: { id: id },
+      where: { id, teamId },
       data: {
         documentId: documentLink ? targetId : null,
         dataroomId: dataroomLink ? targetId : null,
         password: hashedPassword,
         name: linkData.name || null,
-        emailProtected: linkData.emailProtected,
+        emailProtected:
+          linkData.audienceType === LinkAudienceType.GROUP
+            ? true
+            : linkData.emailProtected,
         emailAuthenticated: linkData.emailAuthenticated,
         allowDownload: linkData.allowDownload,
         allowList: linkData.allowList,
@@ -304,29 +242,38 @@ export default async function handle(
         enableNotification: linkData.enableNotification,
         enableFeedback: linkData.enableFeedback,
         enableScreenshotProtection: linkData.enableScreenshotProtection,
+        screenShieldPercentage: linkData.screenShieldPercentage,
         enableCustomMetatag: linkData.enableCustomMetatag,
         metaTitle: linkData.metaTitle || null,
         metaDescription: linkData.metaDescription || null,
         metaImage: linkData.metaImage || null,
+        metaFavicon: linkData.metaFavicon || null,
         enableQuestion: linkData.enableQuestion,
-        feedback: {
-          upsert: {
-            create: {
-              data: {
-                question: linkData.questionText,
-                type: linkData.questionType,
+        ...(linkData.enableQuestion && {
+          feedback: {
+            upsert: {
+              create: {
+                data: {
+                  question: linkData.questionText,
+                  type: linkData.questionType,
+                },
               },
-            },
-            update: {
-              data: {
-                question: linkData.questionText,
-                type: linkData.questionType,
+              update: {
+                data: {
+                  question: linkData.questionText,
+                  type: linkData.questionType,
+                },
               },
             },
           },
-        },
+        }),
         enableAgreement: linkData.enableAgreement,
         agreementId: linkData.agreementId || null,
+        showBanner: linkData.showBanner,
+        enableWatermark: linkData.enableWatermark || false,
+        watermarkConfig: linkData.watermarkConfig || null,
+        groupId: linkData.groupId || null,
+        audienceType: linkData.audienceType || LinkAudienceType.GENERAL,
       },
       include: {
         views: {
@@ -347,6 +294,11 @@ export default async function handle(
     await fetch(
       `${process.env.NEXTAUTH_URL}/api/revalidate?secret=${process.env.REVALIDATE_TOKEN}&linkId=${id}&hasDomain=${updatedLink.domainId ? "true" : "false"}`,
     );
+
+    // Decrypt the password for the updated link
+    if (updatedLink.password !== null) {
+      updatedLink.password = decryptEncrpytedPassword(updatedLink.password);
+    }
 
     return res.status(200).json(updatedLink);
   } else if (req.method == "DELETE") {

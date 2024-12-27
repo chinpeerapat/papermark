@@ -69,7 +69,7 @@ export default function App({
           content="https://www.papermark.io/_static/meta-image.png"
           key="tw-image"
         />
-        <link rel="icon" href="/favicon.ico" />
+        <link rel="icon" href="/favicon.ico" key="favicon" />
       </Head>
       <SessionProvider session={session}>
         <PostHogCustomProvider>
@@ -79,7 +79,7 @@ export default function App({
               enabled={process.env.NEXT_PUBLIC_VERCEL_ENV === "production"}
             >
               <main className={inter.className}>
-                <Toaster closeButton richColors />
+                <Toaster closeButton />
                 <TooltipProvider delayDuration={100}>
                   {EXCLUDED_PATHS.includes(router.pathname) ? (
                     <Component {...pageProps} />

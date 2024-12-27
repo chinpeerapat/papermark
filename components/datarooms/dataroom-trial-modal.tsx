@@ -34,8 +34,12 @@ import {
 
 export function DataroomTrialModal({
   children,
+  openModal = false,
+  setOpenModal,
 }: {
   children?: React.ReactNode;
+  openModal?: boolean;
+  setOpenModal?: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   const router = useRouter();
 
@@ -45,7 +49,7 @@ export function DataroomTrialModal({
   const [companyName, setCompanyName] = useState<string>("");
   const [phoneNumber, setPhoneNumber] = useState<E164Number | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
-  const [open, setOpen] = useState<boolean>(false);
+  const [open, setOpen] = useState<boolean>(openModal);
 
   const teamInfo = useTeam();
   const analytics = useAnalytics();
@@ -70,7 +74,7 @@ export function DataroomTrialModal({
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            name: "Dataroom Demo Trial",
+            name: "Dataroom #1",
             fullName: name,
             companyName,
             industry,
@@ -88,7 +92,7 @@ export function DataroomTrialModal({
       }
 
       analytics.capture("Dataroom Trial Created", {
-        dataroomName: "Dataroom Demo Trial",
+        dataroomName: "Dataroom #1",
         industry,
         companySize,
       });
@@ -103,11 +107,21 @@ export function DataroomTrialModal({
     } finally {
       setLoading(false);
       setOpen(false);
+      if (openModal && setOpenModal) setOpenModal(false);
     }
   };
 
+  const onOpenChange = (open: boolean) => {
+    if (!open) {
+      setOpen(false);
+    } else {
+      setOpen(true);
+    }
+    if (openModal && setOpenModal) setOpenModal(false);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader className="text-start">

@@ -1,6 +1,7 @@
+import Link from "next/link";
 import { useRouter } from "next/router";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 import { useTeam } from "@/context/team-context";
 import { usePlausible } from "next-plausible";
@@ -28,19 +29,26 @@ import {
   createNewDocumentVersion,
 } from "@/lib/documents/create-document";
 import { putFile } from "@/lib/files/put-file";
-import { copyToClipboard } from "@/lib/utils";
+import { usePlan } from "@/lib/swr/use-billing";
+import useLimits from "@/lib/swr/use-limits";
 import { getSupportedContentType } from "@/lib/utils/get-content-type";
+
+import { UpgradePlanModal } from "../billing/upgrade-plan-modal";
 
 export function AddDocumentModal({
   newVersion,
   children,
   isDataroom,
   dataroomId,
+  setAddDocumentModalOpen,
+  openModal,
 }: {
   newVersion?: boolean;
   children: React.ReactNode;
   isDataroom?: boolean;
+  openModal?: boolean;
   dataroomId?: string;
+  setAddDocumentModalOpen?: (isOpen: boolean) => void;
 }) {
   const router = useRouter();
   const plausible = usePlausible();
@@ -50,8 +58,16 @@ export function AddDocumentModal({
   const [currentFile, setCurrentFile] = useState<File | null>(null);
   const [notionLink, setNotionLink] = useState<string | null>(null);
   const teamInfo = useTeam();
+  const { canAddDocuments } = useLimits();
+  const { plan, trial } = usePlan();
+  const isFreePlan = plan === "free";
+  const isTrial = !!trial;
 
   const teamId = teamInfo?.currentTeam?.id as string;
+
+  useEffect(() => {
+    if (openModal) setIsOpen(openModal);
+  }, [openModal]);
 
   /** current folder name */
   const currentFolderPath = router.query.name as string[] | undefined;
@@ -67,20 +83,39 @@ export function AddDocumentModal({
       return; // prevent form from submitting
     }
 
+    if (!canAddDocuments) {
+      toast.error("You have reached the maximum number of documents.");
+      return;
+    }
+
     try {
       setUploading(true);
 
-      const contentType = getSupportedContentType(currentFile.type);
+      let contentType = currentFile.type;
+      let supportedFileType = getSupportedContentType(contentType);
 
-      if (!contentType) {
+      if (
+        currentFile.name.endsWith(".dwg") ||
+        currentFile.name.endsWith(".dxf")
+      ) {
+        supportedFileType = "cad";
+        contentType = `image/vnd.${currentFile.name.split(".").pop()}`;
+      }
+
+      if (currentFile.name.endsWith(".xlsm")) {
+        supportedFileType = "sheet";
+        contentType = "application/vnd.ms-excel.sheet.macroEnabled.12";
+      }
+
+      if (!supportedFileType) {
         setUploading(false);
         toast.error(
-          "Unsupported file format. Please upload a PDF or Excel file.",
+          "Unsupported file format. Please upload a PDF, Powerpoint, Excel, Word or image file.",
         );
         return;
       }
 
-      const { type, data, numPages } = await putFile({
+      const { type, data, numPages, fileSize } = await putFile({
         file: currentFile,
         teamId,
       });
@@ -90,6 +125,8 @@ export function AddDocumentModal({
         key: data!,
         storageType: type!,
         contentType: contentType,
+        supportedFileType: supportedFileType,
+        fileSize: fileSize,
       };
       let response: Response | undefined;
       // create a document or new version in the database
@@ -136,11 +173,7 @@ export function AddDocumentModal({
         }
 
         if (!newVersion) {
-          // copy the link to the clipboard
-          copyToClipboard(
-            `${process.env.NEXT_PUBLIC_BASE_URL}/view/${document.links[0].id}`,
-            "Document uploaded and link copied to clipboard. Redirecting to document page...",
-          );
+          toast.success("Document uploaded. Redirecting to document page...");
 
           // track the event
           plausible("documentUploaded");
@@ -150,12 +183,6 @@ export function AddDocumentModal({
             numPages: document.numPages,
             path: router.asPath,
             type: document.type,
-            teamId: teamId,
-          });
-          analytics.capture("Link Added", {
-            linkId: document.links[0].id,
-            documentId: document.id,
-            customDomain: null,
             teamId: teamId,
           });
 
@@ -186,6 +213,7 @@ export function AddDocumentModal({
     } finally {
       setUploading(false);
       setIsOpen(false);
+      setAddDocumentModalOpen && setAddDocumentModalOpen(false);
     }
   };
 
@@ -248,6 +276,12 @@ export function AddDocumentModal({
     event: FormEvent<HTMLFormElement>,
   ): Promise<void> => {
     event.preventDefault();
+
+    if (!canAddDocuments) {
+      toast.error("You have reached the maximum number of documents.");
+      return;
+    }
+
     const validateNotionPageURL = parsePageId(notionLink);
     // Check if it's a valid URL or not by Regx
     const isValidURL =
@@ -278,6 +312,8 @@ export function AddDocumentModal({
             url: notionLink,
             numPages: 1,
             type: "notion",
+            createLink: false,
+            folderPathName: currentFolderPath?.join("/"),
           }),
         },
       );
@@ -307,10 +343,8 @@ export function AddDocumentModal({
         }
 
         if (!newVersion) {
-          // copy the link to the clipboard
-          copyToClipboard(
-            `${process.env.NEXT_PUBLIC_BASE_URL}/view/${document.links[0].id}`,
-            "Notion Page processed and link copied to clipboard. Redirecting to document page...",
+          toast.success(
+            "Notion Page processed. Redirecting to document page...",
           );
 
           // track the event
@@ -322,12 +356,6 @@ export function AddDocumentModal({
             fileSize: null,
             path: router.asPath,
             type: "notion",
-            teamId: teamId,
-          });
-          analytics.capture("Link Added", {
-            linkId: document.links[0].id,
-            documentId: document.id,
-            customDomain: null,
             teamId: teamId,
           });
 
@@ -354,7 +382,26 @@ export function AddDocumentModal({
     currentFile !== null && setCurrentFile(null);
     notionLink !== null && setNotionLink(null);
     setIsOpen(!isOpen);
+    setAddDocumentModalOpen && setAddDocumentModalOpen(!isOpen);
   };
+
+  if (!canAddDocuments && children) {
+    if (newVersion) {
+      return (
+        <UpgradePlanModal
+          clickedPlan="Pro"
+          trigger={"limit_upload_document_version"}
+        >
+          {children}
+        </UpgradePlanModal>
+      );
+    }
+    return (
+      <UpgradePlanModal clickedPlan="Pro" trigger={"limit_upload_documents"}>
+        <Button>Upgrade to Add Documents</Button>
+      </UpgradePlanModal>
+    );
+  }
 
   return (
     <Dialog open={isOpen} onOpenChange={clearModelStates}>
@@ -381,28 +428,60 @@ export function AddDocumentModal({
                   {newVersion ? `Upload a new version` : `Share a document`}
                 </CardTitle>
                 <CardDescription>
-                  {newVersion
-                    ? `After you upload a new version, the existing links will remain the unchanged but `
-                    : `After you upload the document, a shareable link will be
-                generated and copied to your clipboard.`}
+                  {newVersion ? (
+                    `After you upload a new version, the existing links will remain the unchanged.`
+                  ) : (
+                    <span>
+                      After you upload the document, create a shareable link.{" "}
+                      {isFreePlan && !isTrial ? (
+                        <>
+                          Upload larger files and more{" "}
+                          <Link
+                            href="https://www.papermark.io/help/article/document-types"
+                            target="_blank"
+                            className="underline underline-offset-4 transition-all hover:text-muted-foreground/80 hover:dark:text-muted-foreground/80"
+                          >
+                            file types
+                          </Link>{" "}
+                          with a higher plan.
+                        </>
+                      ) : null}
+                    </span>
+                  )}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
                 <form
                   encType="multipart/form-data"
                   onSubmit={handleFileUpload}
-                  className="flex flex-col"
+                  className="flex flex-col space-y-4"
                 >
                   <div className="space-y-1">
-                    <div className="pb-6">
-                      <div className="grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-6">
-                        <DocumentUpload
-                          currentFile={currentFile}
-                          setCurrentFile={setCurrentFile}
-                        />
-                      </div>
+                    <div className="grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-6">
+                      <DocumentUpload
+                        currentFile={currentFile}
+                        setCurrentFile={setCurrentFile}
+                      />
                     </div>
                   </div>
+
+                  {!newVersion ? (
+                    <div className="flex justify-center">
+                      <button
+                        type="button"
+                        className="text-sm text-muted-foreground underline-offset-4 transition-all hover:text-gray-800 hover:underline hover:dark:text-muted-foreground/80"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          document
+                            .getElementById("upload-multi-files-zone")
+                            ?.click();
+                          clearModelStates();
+                        }}
+                      >
+                        Want to upload multiple files?
+                      </button>
+                    </div>
+                  ) : null}
 
                   <div className="flex justify-center">
                     <Button

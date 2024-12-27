@@ -35,6 +35,10 @@ module.exports = {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
         },
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          foreground: "hsl(var(--warning-foreground))",
+        },
         muted: {
           DEFAULT: "hsl(var(--muted))",
           foreground: "hsl(var(--muted-foreground))",
@@ -151,6 +155,16 @@ module.exports = {
         //**  END: TREMOR fontSize **//
       },
       keyframes: {
+        // Modal
+        "scale-in": {
+          "0%": { transform: "scale(0.95)" },
+          "100%": { transform: "scale(1)" },
+        },
+        "fade-in": {
+          "0%": { opacity: "0" },
+          "100%": { opacity: "1" },
+        },
+        // Others
         gauge_fadeIn: {
           from: { opacity: "0" },
           to: { opacity: "1" },
@@ -177,16 +191,27 @@ module.exports = {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
+        // input-otp
+        "caret-blink": {
+          "0%,70%,100%": { opacity: "1" },
+          "20%,50%": { opacity: "0" },
+        },
       },
       gridTemplateColumns: {
         16: "repeat(16, minmax(0, 1fr))",
       },
       animation: {
+        // Modal
+        "scale-in": "scale-in 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
+        "fade-in": "fade-in 0.2s ease-out forwards",
+        // Others
         gauge_fadeIn: "gauge_fadeIn 1s ease forwards",
         gauge_fill: "gauge_fill 1s ease forwards",
         flyEmoji: "flyEmoji 1s forwards",
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        // input-otp
+        "caret-blink": "caret-blink 1.25s ease-out infinite",
       },
     },
   },
@@ -222,9 +247,9 @@ module.exports = {
   ],
   //**  END: TREMOR safelist **//
   plugins: [
-    require("@headlessui/tailwindcss"),
     require("@tailwindcss/forms"),
     require("tailwindcss-animate"),
     require("@tailwindcss/typography"),
+    require("tailwind-scrollbar-hide"),
   ],
 };

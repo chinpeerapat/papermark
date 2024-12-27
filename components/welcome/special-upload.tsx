@@ -3,8 +3,9 @@ import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
 
 import { useTeam } from "@/context/team-context";
-import { motion } from "framer-motion";
+import { LinkType } from "@prisma/client";
 import Cookies from "js-cookie";
+import { motion } from "motion/react";
 import { usePlausible } from "next-plausible";
 import { toast } from "sonner";
 
@@ -42,8 +43,9 @@ export default function DeckGeneratorUpload() {
   const [currentBlob, setCurrentBlob] = useState<boolean>(false);
   const [currentLinkId, setCurrentLinkId] = useState<string | null>(null);
   const [currentDocId, setCurrentDocId] = useState<string | null>(null);
-  const [linkData, setLinkData] =
-    useState<DEFAULT_LINK_TYPE>(DEFAULT_LINK_PROPS);
+  const [linkData, setLinkData] = useState<DEFAULT_LINK_TYPE>(
+    DEFAULT_LINK_PROPS(LinkType.DOCUMENT_LINK),
+  );
   const teamInfo = useTeam();
 
   const teamId = teamInfo?.currentTeam?.id as string;
@@ -79,9 +81,10 @@ export default function DeckGeneratorUpload() {
     try {
       setUploading(true);
 
-      const contentType = getSupportedContentType(currentFile.type);
+      const contentType = currentFile.type;
+      const supportedFileType = getSupportedContentType(contentType);
 
-      if (!contentType) {
+      if (!supportedFileType) {
         setUploading(false);
         toast.error(
           "Unsupported file format. Please upload a PDF or Excel file.",
@@ -89,7 +92,7 @@ export default function DeckGeneratorUpload() {
         return;
       }
 
-      const { type, data, numPages } = await putFile({
+      const { type, data, numPages, fileSize } = await putFile({
         file: currentFile,
         teamId,
       });
@@ -102,9 +105,16 @@ export default function DeckGeneratorUpload() {
         key: data!,
         storageType: type!,
         contentType: contentType,
+        supportedFileType: supportedFileType,
+        fileSize: fileSize,
       };
       // create a document in the database
-      const response = await createDocument({ documentData, teamId, numPages });
+      const response = await createDocument({
+        documentData,
+        teamId,
+        numPages,
+        createLink: true,
+      });
 
       if (response) {
         const document = await response.json();
@@ -167,7 +177,8 @@ export default function DeckGeneratorUpload() {
         ...linkData,
         metaImage: blobUrl,
         targetId: currentDocId,
-        linkType: "DOCUMENT_LINK",
+        linkType: LinkType.DOCUMENT_LINK,
+        teamId: teamId,
       }),
     });
 
@@ -180,7 +191,7 @@ export default function DeckGeneratorUpload() {
     }
 
     copyToClipboard(
-      `${process.env.NEXT_PUBLIC_BASE_URL}/view/${currentLinkId}`,
+      `${process.env.NEXT_PUBLIC_MARKETING_URL}/view/${currentLinkId}`,
       "Link copied to clipboard. Redirecting to document page...",
     );
 
@@ -314,13 +325,13 @@ export default function DeckGeneratorUpload() {
               </main>
             )}
             {currentLinkId && currentDocId && (
-              <main className="min-h-[300px]">
+              <main className="max-h-[calc(100dvh-10rem)] min-h-[300px] overflow-y-scroll scrollbar-hide">
                 <div className="flex flex-col justify-center">
                   <div className="relative">
                     <div className="flex py-8">
                       <div className="flex w-full max-w-xs focus-within:z-10 sm:max-w-lg">
                         <p className="block w-full overflow-y-scroll rounded-md border-0 bg-secondary px-4 py-1.5 text-left leading-6 text-secondary-foreground md:min-w-[500px]">
-                          {`${process.env.NEXT_PUBLIC_BASE_URL}/view/${currentLinkId}`}
+                          {`${process.env.NEXT_PUBLIC_MARKETING_URL}/view/${currentLinkId}`}
                         </p>
                       </div>
                     </div>
@@ -334,7 +345,11 @@ export default function DeckGeneratorUpload() {
                           </span>
                         </AccordionTrigger>
                         <AccordionContent className="first:pt-5">
-                          <LinkOptions data={linkData} setData={setLinkData} />
+                          <LinkOptions
+                            data={linkData}
+                            setData={setLinkData}
+                            linkType={LinkType.DOCUMENT_LINK}
+                          />
                         </AccordionContent>
                       </AccordionItem>
                     </Accordion>

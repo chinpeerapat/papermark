@@ -1,12 +1,16 @@
 import Stripe from "stripe";
 
-export function getPlanFromPriceId(priceId: string) {
+export function getPlanFromPriceId(
+  priceId: string,
+  isOldAccount: boolean = false,
+) {
   const env =
     process.env.NEXT_PUBLIC_VERCEL_ENV === "production" ? "production" : "test";
+  const accountType = isOldAccount ? "old" : "new";
   return PLANS.find(
     (plan) =>
-      plan.price.monthly.priceIds[env] === priceId ||
-      plan.price.yearly.priceIds[env] === priceId,
+      plan.price.monthly.priceIds[env][accountType] === priceId ||
+      plan.price.yearly.priceIds[env][accountType] === priceId,
   )!;
 }
 
@@ -49,19 +53,34 @@ export const PLANS = [
   {
     name: "Pro",
     slug: "pro",
+    minQuantity: 2,
     price: {
       monthly: {
         amount: 39,
+        unitPrice: 1950,
         priceIds: {
-          test: "price_1P3JdWFJyGSZ96lhLqX6drHK",
-          production: "price_1P3FK4FJyGSZ96lhD67yF3lj",
+          test: {
+            old: "price_1Q3bcHFJyGSZ96lhElXBA5C1",
+            new: "price_1Q8aUBBYvhH6u7U7LPIVxYpz",
+          },
+          production: {
+            old: "price_1P3FK4FJyGSZ96lhD67yF3lj",
+            new: "price_1Q8egtBYvhH6u7U7gq1Pbp5Z",
+          },
         },
       },
       yearly: {
-        amount: 25,
+        amount: 29,
+        unitPrice: 1450,
         priceIds: {
-          test: "price_1P3JlWFJyGSZ96lhddEsPKGg",
-          production: "price_1P6VTgFJyGSZ96lhshdgZ1it",
+          test: {
+            old: "price_1Q3bV9FJyGSZ96lhCYWIcmg5",
+            new: "price_1Q8aTkBYvhH6u7U7kUiNTSLX",
+          },
+          production: {
+            old: "price_1Q3gfNFJyGSZ96lh2jGhEadm",
+            new: "price_1Q8egtBYvhH6u7U7T4ehn7SM",
+          },
         },
       },
     },
@@ -69,19 +88,34 @@ export const PLANS = [
   {
     name: "Business",
     slug: "business",
+    minQuantity: 3,
     price: {
       monthly: {
         amount: 79,
+        unitPrice: 2633,
         priceIds: {
-          test: "price_1OuYgCFJyGSZ96lhF2gFs7Rs",
-          production: "price_1OuYeIFJyGSZ96lhwH58Y1kU",
+          test: {
+            old: "price_1Q3bPhFJyGSZ96lhnxpiJMwz",
+            new: "price_1Q8aWlBYvhH6u7U7gTeKJJ0Y",
+          },
+          production: {
+            old: "price_1Q3gbVFJyGSZ96lhf7hsZciQ",
+            new: "price_1Q8egwBYvhH6u7U7XKLGjgHL",
+          },
         },
       },
       yearly: {
-        amount: 45,
+        amount: 59,
+        unitPrice: 1967,
         priceIds: {
-          test: "price_1PTn5iFJyGSZ96lhMbSVkntM",
-          production: "price_1PThmeFJyGSZ96lh1cY3Klrq",
+          test: {
+            old: "price_1Q3bQ5FJyGSZ96lhoS8QbYXr",
+            new: "price_1Q8aVSBYvhH6u7U72mn6iPfK",
+          },
+          production: {
+            old: "price_1Q3gbVFJyGSZ96lhqqLhBNDv",
+            new: "price_1Q8egwBYvhH6u7U7wRU6iPcW",
+          },
         },
       },
     },
@@ -89,21 +123,40 @@ export const PLANS = [
   {
     name: "Data Rooms",
     slug: "datarooms",
+    minQuantity: 3,
     price: {
       monthly: {
-        amount: 199,
+        amount: 149,
+        unitPrice: 4967,
         priceIds: {
-          test: "price_1PAtTfFJyGSZ96lhbi4XZU2d",
-          production: "price_1PAtQOFJyGSZ96lhJNZO2LHx",
+          test: {
+            old: "price_1Q3bHPFJyGSZ96lhpQD0lMdU",
+            new: "price_1Q8aYLBYvhH6u7U7RUqHnsBh",
+          },
+          production: {
+            old: "price_1Q3gbbFJyGSZ96lhvmEwjZtm",
+            new: "price_1Q8egzBYvhH6u7U7IQUGzwoZ",
+          },
         },
       },
       yearly: {
         amount: 99,
+        unitPrice: 3300,
         priceIds: {
-          test: "price_1PTn5SFJyGSZ96lhCnBMuUVX",
-          production: "price_1PThnKFJyGSZ96lhZqFuHiBO",
+          test: {
+            old: "price_1Q3bJUFJyGSZ96lhLiEJlXlt",
+            new: "price_1Q8aXWBYvhH6u7U7unPGTnfy",
+          },
+          production: {
+            old: "price_1Q3gbbFJyGSZ96lhnk1CtnIZ",
+            new: "price_1Q8egzBYvhH6u7U7M2uoROMa",
+          },
         },
       },
     },
   },
 ];
+
+export const isOldAccount = (plan: string) => {
+  return plan.includes("old");
+};

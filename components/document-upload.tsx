@@ -1,50 +1,24 @@
 import { useMemo } from "react";
 
-import {
-  Upload as ArrowUpTrayIcon,
-  File as DocumentIcon,
-  FileText as DocumentTextIcon,
-  FileSpreadsheetIcon,
-  Image as PhotoIcon,
-  Presentation as PresentationChartBarIcon,
-} from "lucide-react";
+import { UploadIcon } from "lucide-react";
+import { useTheme } from "next-themes";
 import { useDropzone } from "react-dropzone";
 import { toast } from "sonner";
 
+import { SUPPORTED_DOCUMENT_MIME_TYPES } from "@/lib/constants";
 import { usePlan } from "@/lib/swr/use-billing";
 import { bytesToSize } from "@/lib/utils";
+import { fileIcon } from "@/lib/utils/get-file-icon";
 import { getPagesCount } from "@/lib/utils/get-page-number-count";
 
 const fileSizeLimits: { [key: string]: number } = {
-  "application/vnd.ms-excel": 100, // 30 MB
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": 30, // 30 MB
-  "text/csv": 30, // 30 MB
-  "application/vnd.oasis.opendocument.spreadsheet": 30, // 30 MB
+  "application/vnd.ms-excel": 40, // 40 MB
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": 40, // 40 MB
+  "application/vnd.oasis.opendocument.spreadsheet": 40, // 40 MB
+  "image/png": 100, // 100 MB
+  "image/jpeg": 100, // 100 MB
+  "image/jpg": 100, // 100 MB
 };
-
-function fileIcon(fileType: string) {
-  switch (fileType) {
-    case "application/pdf":
-      return <DocumentTextIcon className="mx-auto h-6 w-6" />;
-    case "image/png":
-    case "image/jpeg":
-    case "image/gif":
-    case "image/jpg":
-      return <PhotoIcon className="mx-auto h-6 w-6" />;
-    case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-    case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-    case "application/vnd.ms-powerpoint":
-    case "application/msword":
-      return <PresentationChartBarIcon className="mx-auto h-6 w-6" />;
-    case "application/vnd.ms-excel":
-    case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-    case "text/csv":
-    case "application/vnd.oasis.opendocument.spreadsheet":
-      return <FileSpreadsheetIcon className="mx-auto h-6 w-6" />;
-    default:
-      return <DocumentIcon className="mx-auto h-6 w-6" />;
-  }
-}
 
 export default function DocumentUpload({
   currentFile,
@@ -53,16 +27,53 @@ export default function DocumentUpload({
   currentFile: File | null;
   setCurrentFile: React.Dispatch<React.SetStateAction<File | null>>;
 }) {
-  const { plan, loading } = usePlan();
-  const maxSize = plan === "business" || plan === "datarooms" ? 100 : 30;
+  const { theme, systemTheme } = useTheme();
+  const isLight =
+    theme === "light" || (theme === "system" && systemTheme === "light");
+  const { plan, trial } = usePlan();
+  const isFreePlan = plan === "free";
+  const isTrial = !!trial;
+  const maxSize = isFreePlan && !isTrial ? 30 : 100;
+  const maxNumPages = isFreePlan && !isTrial ? 100 : 500;
+
   const { getRootProps, getInputProps } = useDropzone({
-    accept: {
-      "application/pdf": [], // ".pdf"
-      "application/vnd.ms-excel": [], // ".xls"
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [], // ".xlsx"
-      "text/csv": [], // ".csv"
-      "application/vnd.oasis.opendocument.spreadsheet": [], // ".ods"
-    },
+    accept:
+      isFreePlan && !isTrial
+        ? {
+            "application/pdf": [], // ".pdf"
+            "application/vnd.ms-excel": [], // ".xls"
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+              [], // ".xlsx"
+            "text/csv": [], // ".csv"
+            "application/vnd.oasis.opendocument.spreadsheet": [], // ".ods"
+            "image/png": [], // ".png"
+            "image/jpeg": [], // ".jpeg"
+            "image/jpg": [], // ".jpg"
+          }
+        : {
+            "application/pdf": [], // ".pdf"
+            "application/vnd.ms-excel": [], // ".xls"
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+              [], // ".xlsx"
+            "application/vnd.ms-excel.sheet.macroEnabled.12": [".xlsm"], // ".xlsm"
+            "text/csv": [], // ".csv"
+            "application/vnd.oasis.opendocument.spreadsheet": [], // ".ods"
+            "application/vnd.ms-powerpoint": [], // ".ppt"
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+              [], // ".pptx"
+            "application/vnd.oasis.opendocument.presentation": [], // ".odp"
+            "application/msword": [], // ".doc"
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+              [], // ".docx"
+            "application/vnd.oasis.opendocument.text": [], // ".odt"
+            "image/vnd.dwg": [".dwg"], // ".dwg"
+            "image/vnd.dxf": [".dxf"], // ".dxf"
+            "image/png": [], // ".png"
+            "image/jpeg": [], // ".jpeg"
+            "image/jpg": [], // ".jpg"
+            "application/zip": [], // ".zip"
+            "application/x-zip-compressed": [], // ".zip"
+          },
     multiple: false,
     maxSize: maxSize * 1024 * 1024, // 30 MB
     onDropAccepted: (acceptedFiles) => {
@@ -85,8 +96,8 @@ export default function DocumentUpload({
         .arrayBuffer()
         .then((buffer) => {
           getPagesCount(buffer).then((numPages) => {
-            if (numPages > 300) {
-              toast.error("File has too many pages (max. 100)");
+            if (numPages > maxNumPages) {
+              toast.error(`File has too many pages (max. ${maxNumPages})`);
             } else {
               setCurrentFile(file);
             }
@@ -98,12 +109,19 @@ export default function DocumentUpload({
         });
     },
     onDropRejected: (fileRejections) => {
-      const { errors } = fileRejections[0];
+      const { errors, file } = fileRejections[0];
       let message;
       if (errors[0].code === "file-too-large") {
-        message = `File size too big (max. ${maxSize} MB)`;
+        message = `File size too big (max. ${maxSize} MB)${
+          isFreePlan && !isTrial
+            ? `. Upgrade to a paid plan to increase the limit.`
+            : ""
+        }`;
       } else if (errors[0].code === "file-invalid-type") {
-        message = "File type not supported";
+        const isSupported = SUPPORTED_DOCUMENT_MIME_TYPES.includes(file.type);
+        message = `File type not supported ${
+          isFreePlan && !isTrial && isSupported ? `on free plan` : ""
+        }`;
       } else {
         message = errors[0].message;
       }
@@ -134,15 +152,21 @@ export default function DocumentUpload({
               }}
             />
           ) : null}
-          <div className="text-center">
+
+          <div className="max-w-md text-center">
             {currentFile ? (
-              <div className="flex flex-col items-center space-y-1 text-foreground sm:flex-row sm:space-x-2">
-                <div>{fileIcon(currentFile.type)}</div>
-                <p>{currentFile.name}</p>
+              <div className="flex flex-col items-center text-foreground sm:flex-row sm:space-x-2">
+                <div>
+                  {fileIcon({
+                    fileType: currentFile.type,
+                    isLight,
+                  })}
+                </div>
+                <p className="max-w-md truncate">{currentFile.name}</p>
                 <p className="text-gray-500">{bytesToSize(currentFile.size)}</p>
               </div>
             ) : (
-              <ArrowUpTrayIcon
+              <UploadIcon
                 className="mx-auto h-10 w-10 text-gray-500"
                 aria-hidden="true"
               />
@@ -156,7 +180,9 @@ export default function DocumentUpload({
             <p className="text-xs leading-5 text-gray-500">
               {currentFile
                 ? "Replace file?"
-                : `Only *.xls, *.xlsx, *.csv, *.ods, *.pdf & ${maxSize} MB limit`}
+                : isFreePlan && !isTrial
+                  ? `Only *.pdf, *.xls, *.xlsx, *.csv, *.ods, *.png, *.jpeg, *.jpg & ${maxSize} MB limit`
+                  : `Only *.pdf, *.pptx, *.docx, *.xlsx, *.xls, *.xlsm, *.csv, *.ods, *.ppt, *.odp, *.doc, *.odt, *.dwg, *.dxf, *.png, *.jpg, *.jpeg & ${maxSize} MB limit`}
             </p>
           </div>
         </div>

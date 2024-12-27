@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { motion } from "framer-motion";
+import { motion } from "motion/react";
 
 import {
   Select,
@@ -21,12 +21,12 @@ import { LinkUpgradeOptions } from "./link-options";
 export default function AgreementSection({
   data,
   setData,
-  hasFreePlan,
+  isAllowed,
   handleUpgradeStateChange,
 }: {
   data: DEFAULT_LINK_TYPE;
   setData: React.Dispatch<React.SetStateAction<DEFAULT_LINK_TYPE>>;
-  hasFreePlan: boolean;
+  isAllowed: boolean;
   handleUpgradeStateChange: ({
     state,
     trigger,
@@ -68,9 +68,11 @@ export default function AgreementSection({
     <div className="pb-5">
       <LinkItem
         title="Require NDA to view"
+        link="https://www.papermark.io/help/article/require-nda-to-view"
+        tooltipContent="Users must acknowledge an agreement to access the content."
         enabled={enabled}
         action={handleAgreement}
-        hasFreePlan={hasFreePlan}
+        isAllowed={isAllowed}
         requiredPlan="datarooms"
         upgradeAction={() =>
           handleUpgradeStateChange({

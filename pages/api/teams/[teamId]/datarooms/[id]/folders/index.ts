@@ -23,7 +23,13 @@ export default async function handle(
       teamId,
       id: dataroomId,
       root,
-    } = req.query as { teamId: string; id: string; root?: string };
+      include_documents,
+    } = req.query as {
+      teamId: string;
+      id: string;
+      root?: string;
+      include_documents?: string;
+    };
 
     try {
       // Check if the user is part of the team
@@ -49,9 +55,12 @@ export default async function handle(
             dataroomId,
             parentId: null,
           },
-          orderBy: {
-            name: "asc",
-          },
+          orderBy: [
+            { orderIndex: "asc" },
+            {
+              name: "asc",
+            },
+          ],
           include: {
             _count: {
               select: { documents: true, childFolders: true },
@@ -62,13 +71,70 @@ export default async function handle(
         return res.status(200).json(folders);
       }
 
+      if (include_documents === "true") {
+        const dataroomFolders = await prisma.dataroom.findUnique({
+          where: {
+            id: dataroomId,
+          },
+          select: {
+            documents: {
+              where: { folderId: null },
+              orderBy: [{ orderIndex: "asc" }, { document: { name: "asc" } }],
+              select: {
+                id: true,
+                folderId: true,
+                document: {
+                  select: {
+                    id: true,
+                    name: true,
+                    type: true,
+                  },
+                },
+              },
+            },
+            folders: {
+              include: {
+                documents: {
+                  select: {
+                    id: true,
+                    folderId: true,
+                    document: {
+                      select: {
+                        id: true,
+                        name: true,
+                        type: true,
+                      },
+                    },
+                  },
+                  orderBy: [
+                    { orderIndex: "asc" },
+                    { document: { name: "asc" } },
+                  ],
+                },
+              },
+              orderBy: [{ orderIndex: "asc" }, { name: "asc" }],
+            },
+          },
+        });
+
+        const folders = [
+          ...(dataroomFolders?.documents ?? []),
+          ...(dataroomFolders?.folders ?? []),
+        ];
+
+        return res.status(200).json(folders);
+      }
+
       const folders = await prisma.dataroomFolder.findMany({
         where: {
           dataroomId,
         },
-        orderBy: {
-          name: "asc",
-        },
+        orderBy: [
+          { orderIndex: "asc" },
+          {
+            name: "asc",
+          },
+        ],
         include: {
           documents: {
             select: {
@@ -82,11 +148,14 @@ export default async function handle(
                 },
               },
             },
-            orderBy: {
-              document: {
-                name: "asc",
+            orderBy: [
+              { orderIndex: "asc" },
+              {
+                document: {
+                  name: "asc",
+                },
               },
-            },
+            ],
           },
           childFolders: {
             include: {
@@ -102,11 +171,14 @@ export default async function handle(
                     },
                   },
                 },
-                orderBy: {
-                  document: {
-                    name: "asc",
+                orderBy: [
+                  { orderIndex: "asc" },
+                  {
+                    document: {
+                      name: "asc",
+                    },
                   },
-                },
+                ],
               },
             },
           },

@@ -3,8 +3,8 @@ import { useRouter } from "next/router";
 import { useState } from "react";
 
 import { useTeam } from "@/context/team-context";
-import { motion } from "framer-motion";
 import { E164Number } from "libphonenumber-js";
+import { motion } from "motion/react";
 import { toast } from "sonner";
 import { mutate } from "swr";
 
@@ -57,7 +57,7 @@ export default function DataroomTrial() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            name: "Dataroom Demo Trial",
+            name: "Dataroom #1",
             fullName: name,
             companyName,
             industry,
@@ -74,19 +74,27 @@ export default function DataroomTrial() {
         return;
       }
 
+      const { id: dataroomId } = await response.json(); // Assuming the API returns the created dataroom's ID
+
+      if (!dataroomId) {
+        throw new Error("No dataroom ID returned from the server");
+      }
+
       analytics.capture("Dataroom Trial Created", {
-        dataroomName: "Dataroom Demo Trial",
+        dataroomName: "Dataroom #1",
         industry,
         companySize,
+        dataroomId,
       });
       toast.success("Dataroom successfully created! 🎉");
 
       await mutate(`/api/teams/${teamInfo?.currentTeam?.id}/datarooms`);
-      router.push("/datarooms");
+
+      // Instead of redirecting to "/datarooms", we'll navigate to the dataroom-upload page
+      router.push(`/welcome?type=dataroom-upload&dataroomId=${dataroomId}`);
     } catch (error) {
-      setLoading(false);
       toast.error("Error adding dataroom. Please try again.");
-      return;
+      console.error("Error creating dataroom:", error);
     } finally {
       setLoading(false);
     }
@@ -236,9 +244,11 @@ export default function DataroomTrial() {
                 <button className="underline">Business</button>
               </UpgradePlanModal>{" "}
               plan. <br /> */}
-              After the trial, upgrade to{" "}
+              No credit card is required. After the trial, upgrade to{" "}
               <UpgradePlanModal clickedPlan="Business">
-                <button className="underline">Papermark Business</button>
+                <button className="underline">
+                  Papermark Business or Data Rooms
+                </button>
               </UpgradePlanModal>{" "}
               to continue using data rooms.
             </div>

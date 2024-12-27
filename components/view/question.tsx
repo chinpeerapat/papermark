@@ -1,7 +1,7 @@
 import { useState } from "react";
 
-import { motion } from "framer-motion";
 import { ThumbsDownIcon, ThumbsUpIcon } from "lucide-react";
+import { motion } from "motion/react";
 
 import { STAGGER_CHILD_VARIANTS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
@@ -11,16 +11,25 @@ export default function Question({
   viewId,
   submittedFeedback,
   setSubmittedFeedback,
+  isPreview,
 }: {
   feedback: { id: string; data: { question: string; type: string } };
-  viewId: string;
+  viewId?: string;
   submittedFeedback: boolean;
   setSubmittedFeedback: (submittedFeedback: boolean) => void;
+  isPreview?: boolean;
 }) {
   const [answer, setAnswer] = useState<"yes" | "no" | "">("");
 
   const handleQuestionSubmit = async (answer: string) => {
     if (answer === "") return;
+
+    // If in preview mode, skip recording the answer
+    if (isPreview) {
+      setAnswer(answer as "yes" | "no");
+      setSubmittedFeedback(true);
+      return;
+    }
 
     const response = await fetch(`/api/feedback`, {
       method: "POST",

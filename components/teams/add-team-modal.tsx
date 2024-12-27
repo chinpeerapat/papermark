@@ -5,6 +5,7 @@ import { useState } from "react";
 import { usePlausible } from "next-plausible";
 import { toast } from "sonner";
 
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -14,10 +15,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export function AddTeamModal({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -38,7 +37,7 @@ export function AddTeamModal({ children }: { children: React.ReactNode }) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        team: teamName,
+        team: teamName.trim(),
       }),
     });
 

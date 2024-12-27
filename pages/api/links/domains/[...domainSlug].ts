@@ -1,12 +1,11 @@
 import { NextApiRequest, NextApiResponse } from "next";
 
-import {
-  Brand,
-  DataroomBrand,
-  DataroomDocument,
-  Document,
-} from "@prisma/client";
+import { Brand, DataroomBrand, LinkAudienceType } from "@prisma/client";
 
+import {
+  fetchDataroomLinkData,
+  fetchDocumentLinkData,
+} from "@/lib/api/links/link-data";
 import prisma from "@/lib/prisma";
 import { log } from "@/lib/utils";
 
@@ -49,9 +48,11 @@ export default async function handle(
           enableCustomMetatag: true,
           enableFeedback: true,
           enableScreenshotProtection: true,
+          screenShieldPercentage: true,
           metaTitle: true,
           metaDescription: true,
           metaImage: true,
+          metaFavicon: true,
           enableQuestion: true,
           linkType: true,
           feedback: {
@@ -62,24 +63,15 @@ export default async function handle(
           },
           enableAgreement: true,
           agreement: true,
-          document: {
+          showBanner: true,
+          enableWatermark: true,
+          watermarkConfig: true,
+          groupId: true,
+          audienceType: true,
+          teamId: true,
+          team: {
             select: {
-              team: {
-                select: {
-                  id: true,
-                  plan: true,
-                },
-              },
-            },
-          },
-          dataroom: {
-            select: {
-              team: {
-                select: {
-                  id: true,
-                  plan: true,
-                },
-              },
+              plan: true,
             },
           },
         },
@@ -105,10 +97,10 @@ export default async function handle(
         });
       }
 
-      const teamPlan = link.document?.team?.plan || link.dataroom?.team.plan;
-      const teamId = link.document?.team?.id || link.dataroom?.team.id;
+      const teamPlan = link.team?.plan || "free";
+      const teamId = link.teamId;
       // if owner of document is on free plan, return 404
-      if (teamPlan === "free") {
+      if (teamPlan.includes("free")) {
         log({
           message: `Link is from a free team _${teamId}_ for custom domain _${domain}/${slug}_`,
           type: "info",
@@ -125,130 +117,30 @@ export default async function handle(
       let linkData: any;
 
       if (linkType === "DOCUMENT_LINK") {
-        linkData = await prisma.link.findUnique({
-          where: { id: link.id },
-          select: {
-            document: {
-              select: {
-                id: true,
-                name: true,
-                teamId: true,
-                ownerId: true,
-                team: { select: { plan: true } },
-                versions: {
-                  where: { isPrimary: true },
-                  select: {
-                    id: true,
-                    versionNumber: true,
-                    hasPages: true,
-                    type: true,
-                    file: true,
-                    isVertical: true,
-                  },
-                  take: 1,
-                },
-              },
-            },
-          },
+        const data = await fetchDocumentLinkData({
+          linkId: link.id,
+          teamId: link.teamId!,
         });
-
-        brand = await prisma.brand.findFirst({
-          where: {
-            teamId: linkData.document.teamId,
-          },
-          select: {
-            logo: true,
-            brandColor: true,
-            accentColor: true,
-          },
-        });
+        linkData = data.linkData;
+        brand = data.brand;
       } else if (linkType === "DATAROOM_LINK") {
-        linkData = await prisma.link.findUnique({
-          where: { id: link.id },
-          select: {
-            dataroom: {
-              select: {
-                id: true,
-                name: true,
-                teamId: true,
-                documents: {
-                  select: {
-                    id: true,
-                    folderId: true,
-                    updatedAt: true,
-                    document: {
-                      select: {
-                        id: true,
-                        name: true,
-                        versions: {
-                          where: { isPrimary: true },
-                          select: {
-                            id: true,
-                            versionNumber: true,
-                            type: true,
-                            hasPages: true,
-                            file: true,
-                            isVertical: true,
-                          },
-                          take: 1,
-                        },
-                      },
-                    },
-                  },
-                  orderBy: {
-                    document: {
-                      name: "asc",
-                    },
-                  },
-                },
-                folders: {
-                  orderBy: {
-                    name: "asc",
-                  },
-                },
-              },
-            },
-          },
+        const data = await fetchDataroomLinkData({
+          linkId: link.id,
+          teamId: link.teamId!,
+          ...(link.audienceType === LinkAudienceType.GROUP &&
+            link.groupId && {
+              groupId: link.groupId,
+            }),
         });
-
-        // Sort documents by name considering the numerical part
-        linkData.dataroom.documents.sort(
-          (
-            a: DataroomDocument & { document: Document },
-            b: DataroomDocument & { document: Document },
-          ) => {
-            const getNumber = (str: string): number => {
-              const match = str.match(/^\d+/);
-              return match ? parseInt(match[0], 10) : 0;
-            };
-
-            const numA = getNumber(a.document.name);
-            const numB = getNumber(b.document.name);
-
-            if (numA !== numB) {
-              return numA - numB;
-            }
-
-            // If numerical parts are the same, fall back to lexicographical order
-            return a.document.name.localeCompare(b.document.name);
-          },
-        );
-
-        brand = await prisma.dataroomBrand.findFirst({
-          where: {
-            dataroomId: linkData.dataroom.id,
-          },
-          select: {
-            logo: true,
-            banner: true,
-            brandColor: true,
-          },
-        });
+        linkData = data.linkData;
+        brand = data.brand;
       }
 
       // remove document and domain from link
       const sanitizedLink = {
         ...link,
+        teamId: undefined,
+        team: undefined,
         document: undefined,
         dataroom: undefined,
       };
@@ -272,7 +164,7 @@ export default async function handle(
       });
     }
   } else {
-    // We only allow GET and POST requests
+    // We only allow GET requests
     res.setHeader("Allow", ["GET"]);
     return res.status(405).end(`Method ${req.method} Not Allowed`);
   }

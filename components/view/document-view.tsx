@@ -3,6 +3,7 @@ import { useRouter } from "next/router";
 import React, { useEffect, useRef, useState } from "react";
 
 import { Brand } from "@prisma/client";
+import Cookies from "js-cookie";
 import { usePlausible } from "next-plausible";
 import { ExtendedRecordMap } from "notion-types";
 import { toast } from "sonner";
@@ -14,7 +15,7 @@ import AccessForm, {
 } from "@/components/view/access-form";
 
 import { useAnalytics } from "@/lib/analytics";
-import { LinkWithDocument } from "@/lib/types";
+import { LinkWithDocument, NotionTheme, WatermarkConfig } from "@/lib/types";
 
 import EmailVerificationMessage from "./email-verification-form";
 import ViewData from "./view-data";
@@ -27,13 +28,22 @@ type SheetData = {
 };
 
 export type DEFAULT_DOCUMENT_VIEW_TYPE = {
-  viewId: string;
+  viewId?: string;
   file?: string | null;
   pages?:
-    | { file: string; pageNumber: string; embeddedLinks: string[] }[]
+    | {
+        file: string;
+        pageNumber: string;
+        embeddedLinks: string[];
+        pageLinks: { href: string; coords: string }[];
+        metadata: { width: number; height: number; scaleFactor: number };
+      }[]
     | null;
   sheetData?: SheetData[] | null;
   fileType?: string;
+  isPreview?: boolean;
+  ipAddress?: string;
+  verificationToken?: string;
 };
 
 export default function DocumentView({
@@ -48,6 +58,10 @@ export default function DocumentView({
   showPoweredByBanner,
   showAccountCreationSlide,
   useAdvancedExcelViewer,
+  previewToken,
+  disableEditEmail,
+  useCustomAccessForm,
+  isEmbedded,
 }: {
   link: LinkWithDocument;
   userEmail: string | null | undefined;
@@ -56,6 +70,7 @@ export default function DocumentView({
   notionData?: {
     rootNotionPageId: string | null;
     recordMap: ExtendedRecordMap | null;
+    theme: NotionTheme | null;
   };
   brand?: Partial<Brand> | null;
   token?: string;
@@ -63,6 +78,10 @@ export default function DocumentView({
   showPoweredByBanner?: boolean;
   showAccountCreationSlide?: boolean;
   useAdvancedExcelViewer?: boolean;
+  previewToken?: string;
+  disableEditEmail?: boolean;
+  useCustomAccessForm?: boolean;
+  isEmbedded?: boolean;
 }) {
   const {
     document,
@@ -86,6 +105,11 @@ export default function DocumentView({
   );
   const [verificationRequested, setVerificationRequested] =
     useState<boolean>(false);
+  const [verificationToken, setVerificationToken] = useState<string | null>(
+    token ?? null,
+  );
+  const [code, setCode] = useState<string | null>(null);
+  const [isInvalidCode, setIsInvalidCode] = useState<boolean>(false);
 
   const handleSubmission = async (): Promise<void> => {
     setIsLoading(true);
@@ -104,9 +128,11 @@ export default function DocumentView({
         userId: userId ?? null,
         documentVersionId: document.versions[0].id,
         hasPages: document.versions[0].hasPages,
-        token: token ?? null,
-        verifiedEmail: verifiedEmail ?? null,
         useAdvancedExcelViewer,
+        previewToken,
+        code: code ?? undefined,
+        token: verificationToken ?? undefined,
+        verifiedEmail: verifiedEmail ?? undefined,
       }),
     });
 
@@ -117,8 +143,16 @@ export default function DocumentView({
         setVerificationRequested(true);
         setIsLoading(false);
       } else {
-        const { viewId, file, pages, sheetData, fileType } =
-          fetchData as DEFAULT_DOCUMENT_VIEW_TYPE;
+        const {
+          viewId,
+          file,
+          pages,
+          sheetData,
+          fileType,
+          isPreview,
+          ipAddress,
+          verificationToken,
+        } = fetchData as DEFAULT_DOCUMENT_VIEW_TYPE;
         plausible("documentViewed"); // track the event
         analytics.identify(
           userEmail ?? verifiedEmail ?? data.email ?? undefined,
@@ -129,8 +163,29 @@ export default function DocumentView({
           linkType: "DOCUMENT_LINK",
           viewerId: viewId,
           viewerEmail: data.email ?? verifiedEmail ?? userEmail,
+          isEmbedded,
         });
-        setViewData({ viewId, file, pages, sheetData, fileType });
+
+        // set the verification token to the cookie
+        if (verificationToken) {
+          Cookies.set("pm_vft", verificationToken, {
+            path: router.asPath.split("?")[0],
+            expires: 1,
+            sameSite: "strict",
+            secure: true,
+          });
+          setCode(null);
+        }
+
+        setViewData({
+          viewId,
+          file,
+          pages,
+          sheetData,
+          fileType,
+          isPreview,
+          ipAddress,
+        });
         setSubmitted(true);
         setVerificationRequested(false);
         setIsLoading(false);
@@ -140,18 +195,12 @@ export default function DocumentView({
       toast.error(data.message);
 
       if (data.resetVerification) {
-        const currentQuery = { ...router.query };
-        delete currentQuery.token;
-        delete currentQuery.email;
+        const currentPath = router.asPath.split("?")[0];
 
-        router.replace(
-          {
-            pathname: router.pathname,
-            query: currentQuery,
-          },
-          undefined,
-          { shallow: true },
-        );
+        Cookies.remove("pm_vft", { path: currentPath });
+        setVerificationToken(null);
+        setCode(null);
+        setIsInvalidCode(true);
       }
       setIsLoading(false);
     }
@@ -182,6 +231,10 @@ export default function DocumentView({
         onSubmitHandler={handleSubmit}
         data={data}
         isLoading={isLoading}
+        code={code}
+        setCode={setCode}
+        isInvalidCode={isInvalidCode}
+        setIsInvalidCode={setIsInvalidCode}
       />
     );
   }
@@ -197,9 +250,13 @@ export default function DocumentView({
         requireEmail={emailProtected}
         requirePassword={!!linkPassword}
         requireAgreement={enableAgreement!}
+        agreementName={link.agreement?.name}
         agreementContent={link.agreement?.content}
+        requireName={link.agreement?.requireName}
         isLoading={isLoading}
         brand={brand}
+        disableEditEmail={disableEditEmail}
+        useCustomAccessForm={useCustomAccessForm}
       />
     );
   }

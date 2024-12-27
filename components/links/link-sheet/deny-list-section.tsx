@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
-import { motion } from "framer-motion";
+import { motion } from "motion/react";
+
+import { Textarea } from "@/components/ui/textarea";
 
 import { FADE_IN_ANIMATION_SETTINGS } from "@/lib/constants";
 import { sanitizeAllowDenyList } from "@/lib/utils";
@@ -12,19 +14,20 @@ import { LinkUpgradeOptions } from "./link-options";
 export default function DenyListSection({
   data,
   setData,
-  hasFreePlan,
+  isAllowed,
   handleUpgradeStateChange,
 }: {
   data: DEFAULT_LINK_TYPE;
   setData: React.Dispatch<React.SetStateAction<DEFAULT_LINK_TYPE>>;
-  hasFreePlan: boolean;
+
+  isAllowed: boolean;
   handleUpgradeStateChange: ({
     state,
     trigger,
     plan,
   }: LinkUpgradeOptions) => void;
 }) {
-  const { emailAuthenticated, denyList } = data;
+  const { emailProtected, denyList } = data;
   // Initialize enabled state based on whether denyList is not null and not empty
   const [enabled, setEnabled] = useState<boolean>(
     !!denyList && denyList.length > 0,
@@ -36,12 +39,12 @@ export default function DenyListSection({
   useEffect(() => {
     // Update the denyList in the data state when their inputs change
     const newDenyList = sanitizeAllowDenyList(denyListInput);
-    setEnabled((prevEnabled) => prevEnabled && emailAuthenticated);
+    setEnabled((prevEnabled) => prevEnabled && emailProtected);
     setData((prevData) => ({
       ...prevData,
-      denyList: emailAuthenticated && enabled ? newDenyList : [],
+      denyList: emailProtected && enabled ? newDenyList : [],
     }));
-  }, [denyListInput, enabled, emailAuthenticated, setData]);
+  }, [denyListInput, enabled, emailProtected, setData]);
 
   const handleEnableDenyList = () => {
     const updatedEnabled = !enabled;
@@ -73,9 +76,11 @@ export default function DenyListSection({
       <div className="flex flex-col space-y-4">
         <LinkItem
           title="Block specified viewers"
+          tooltipContent="Prevent certain users from accessing the content. Enter blocked emails or domains."
           enabled={enabled}
+          link="https://www.papermark.io/help/article/block-list"
           action={handleEnableDenyList}
-          hasFreePlan={hasFreePlan}
+          isAllowed={isAllowed}
           requiredPlan="business"
           upgradeAction={() =>
             handleUpgradeStateChange({
@@ -91,8 +96,8 @@ export default function DenyListSection({
             className="mt-1 block w-full"
             {...FADE_IN_ANIMATION_SETTINGS}
           >
-            <textarea
-              className="form-textarea w-full rounded-md border-0 bg-background py-1.5 text-sm leading-6 text-foreground shadow-sm ring-1 ring-inset ring-input placeholder:text-muted-foreground focus:ring-2 focus:ring-inset focus:ring-gray-400"
+            <Textarea
+              className="focus:ring-inset"
               rows={5}
               placeholder="Enter blocked emails/domains, one per line, e.g.                                      marc@papermark.io                                                                                   @example.org"
               value={denyListInput}

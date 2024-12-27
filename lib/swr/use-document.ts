@@ -2,6 +2,7 @@ import { useRouter } from "next/router";
 
 import { useTeam } from "@/context/team-context";
 import { View } from "@prisma/client";
+import { version } from "os";
 import useSWR from "swr";
 import useSWRImmutable from "swr/immutable";
 
@@ -87,6 +88,8 @@ interface ViewWithDuration extends View {
       name: string;
     };
   } | null;
+  versionNumber: number;
+  versionNumPages: number;
 }
 
 type TStatsData = {
@@ -109,15 +112,19 @@ export function useDocumentVisits(page: number, limit: number) {
       ? `/api/teams/${teamId}/documents/${id}/views?page=${page}&limit=${limit}`
       : null;
 
-  const { data: views, error } = useSWR<TStatsData>(cacheKey, fetcher, {
+  const {
+    data: views,
+    error,
+    mutate,
+  } = useSWR<TStatsData>(cacheKey, fetcher, {
     dedupingInterval: 20000,
-    revalidateOnFocus: false,
   });
 
   return {
     views,
     loading: !error && !views,
     error,
+    mutate,
   };
 }
 
@@ -147,11 +154,15 @@ export function useDocumentProcessingStatus(documentVersionId: string) {
   };
 }
 
-export function useDocumentThumbnail(pageNumber: number, documentId: string) {
+export function useDocumentThumbnail(
+  pageNumber: number,
+  documentId: string,
+  versionNumber?: number,
+) {
   const { data, error } = useSWR<{ imageUrl: string }>(
     pageNumber === 0
       ? null
-      : `/api/jobs/get-thumbnail?documentId=${documentId}&pageNumber=${pageNumber}`,
+      : `/api/jobs/get-thumbnail?documentId=${documentId}&pageNumber=${pageNumber}&versionNumber=${versionNumber}`,
     fetcher,
     {
       dedupingInterval: 1200000,

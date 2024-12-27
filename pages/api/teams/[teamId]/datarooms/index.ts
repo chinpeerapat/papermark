@@ -46,7 +46,7 @@ export default async function handle(
         },
         include: {
           _count: {
-            select: { documents: true },
+            select: { documents: true, views: true },
           },
         },
       });
@@ -75,8 +75,8 @@ export default async function handle(
         where: {
           id: teamId,
           plan: {
-            // exclude all teams not on `business`, `datarooms` plan
-            in: ["business", "datarooms"],
+            // exclude all teams not on `business`, `datarooms`, `business+old`, `datarooms+old` plan
+            in: ["business", "datarooms", "business+old", "datarooms+old"],
           },
           users: {
             some: {
@@ -112,9 +112,6 @@ export default async function handle(
           name: name,
           teamId: teamId,
           pId: pId,
-          links: {
-            create: { linkType: "DATAROOM_LINK" },
-          },
         },
       });
 

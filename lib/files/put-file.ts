@@ -8,13 +8,7 @@ import {
   getSheetsCount,
 } from "@/lib/utils/get-page-number-count";
 
-import { SUPPORTED_DOCUMENT_TYPES } from "../constants";
-
-// type File = {
-//   name: string;
-//   type: string;
-//   arrayBuffer: () => Promise<ArrayBuffer>;
-// };
+import { SUPPORTED_DOCUMENT_MIME_TYPES } from "../constants";
 
 export const putFile = async ({
   file,
@@ -24,10 +18,17 @@ export const putFile = async ({
   file: File;
   teamId: string;
   docId?: string;
-}) => {
+}): Promise<{
+  type: DocumentStorageType | null;
+  data: string | null;
+  numPages: number | undefined;
+  fileSize: number | undefined;
+}> => {
   const NEXT_PUBLIC_UPLOAD_TRANSPORT = process.env.NEXT_PUBLIC_UPLOAD_TRANSPORT;
 
-  const { type, data, numPages } = await match(NEXT_PUBLIC_UPLOAD_TRANSPORT)
+  const { type, data, numPages, fileSize } = await match(
+    NEXT_PUBLIC_UPLOAD_TRANSPORT,
+  )
     .with("s3", async () => putFileInS3({ file, teamId, docId }))
     .with("vercel", async () => putFileInVercel(file))
     .otherwise(() => {
@@ -35,10 +36,11 @@ export const putFile = async ({
         type: null,
         data: null,
         numPages: undefined,
+        fileSize: undefined,
       };
     });
 
-  return { type, data, numPages };
+  return { type, data, numPages, fileSize };
 };
 
 const putFileInVercel = async (file: File) => {
@@ -57,6 +59,7 @@ const putFileInVercel = async (file: File) => {
     type: DocumentStorageType.VERCEL_BLOB,
     data: newBlob.url,
     numPages: numPages,
+    fileSize: file.size,
   };
 };
 
@@ -73,8 +76,15 @@ const putFileInS3 = async ({
     docId = newId("doc");
   }
 
-  if (!SUPPORTED_DOCUMENT_TYPES.includes(file.type)) {
-    throw new Error("Only PDF and Excel files are supported");
+  if (
+    !SUPPORTED_DOCUMENT_MIME_TYPES.includes(file.type) &&
+    !file.name.endsWith(".dwg") &&
+    !file.name.endsWith(".dxf") &&
+    !file.name.endsWith(".xlsm")
+  ) {
+    throw new Error(
+      "Only PDF, Powerpoint, Word, and Excel, ZIP files are supported",
+    );
   }
 
   const presignedResponse = await fetch(
@@ -99,15 +109,17 @@ const putFileInS3 = async ({
     );
   }
 
-  const { url, key } = (await presignedResponse.json()) as {
+  const { url, key, fileName } = (await presignedResponse.json()) as {
     url: string;
     key: string;
+    fileName: string;
   };
 
   const response = await fetch(url, {
     method: "PUT",
     headers: {
       "Content-Type": file.type,
+      "Content-Disposition": `attachment; filename="${fileName}"`,
     },
     body: file,
   });
@@ -125,17 +137,18 @@ const putFileInS3 = async ({
     numPages = await getPagesCount(body);
   }
   // get sheet count for excel files
-  else if (
-    SUPPORTED_DOCUMENT_TYPES.includes(file.type) &&
-    file.type !== "application/pdf"
-  ) {
-    const body = await file.arrayBuffer();
-    numPages = getSheetsCount(body);
-  }
+  // else if (
+  //   SUPPORTED_DOCUMENT_MIME_TYPES.includes(file.type) &&
+  //   file.type !== "application/pdf"
+  // ) {
+  //   const body = await file.arrayBuffer();
+  //   numPages = getSheetsCount(body);
+  // }
 
   return {
     type: DocumentStorageType.S3_PATH,
     data: key,
     numPages: numPages,
+    fileSize: file.size,
   };
 };

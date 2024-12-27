@@ -1,23 +1,25 @@
-import { useState } from "react";
+import { useTeam } from "@/context/team-context";
+import { AlertCircleIcon } from "lucide-react";
+import useSWR from "swr";
 
-import { AddViewerModal } from "@/components/datarooms/add-viewer-modal";
 import { DataroomHeader } from "@/components/datarooms/dataroom-header";
-import StatsCard from "@/components/datarooms/stats-card";
+import { DataroomNavigation } from "@/components/datarooms/dataroom-navigation";
 import AppLayout from "@/components/layouts/app";
-import LinkSheet from "@/components/links/link-sheet";
-import LinksTable from "@/components/links/links-table";
-import { NavMenu } from "@/components/navigation-menu";
-import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import DataroomViewersTable from "@/components/visitors/dataroom-viewers";
-import DataroomVisitorsTable from "@/components/visitors/dataroom-visitors-table";
 
-import { useDataroom, useDataroomLinks } from "@/lib/swr/use-dataroom";
+import { useDataroom } from "@/lib/swr/use-dataroom";
+import { fetcher } from "@/lib/utils";
 
-export default function DataroomPage() {
+export default function DataroomUsersPage() {
+  const teamInfo = useTeam();
   const { dataroom } = useDataroom();
-  const { links } = useDataroomLinks();
-
-  const [modalOpen, setModalOpen] = useState<boolean>(false);
+  const { data: features } = useSWR<{ roomChangeNotifications: boolean }>(
+    teamInfo?.currentTeam?.id
+      ? `/api/feature-flags?teamId=${teamInfo.currentTeam.id}`
+      : null,
+    fetcher,
+  );
 
   if (!dataroom) {
     return <div>Loading...</div>;
@@ -27,56 +29,25 @@ export default function DataroomPage() {
     <AppLayout>
       <div className="relative mx-2 mb-10 mt-4 space-y-8 overflow-hidden px-1 sm:mx-3 md:mx-5 md:mt-5 lg:mx-7 lg:mt-8 xl:mx-10">
         <header>
-          <DataroomHeader
-            title={dataroom.name}
-            description={dataroom.pId}
-            actions={[
-              <Button onClick={() => setModalOpen(true)} key={1}>
-                Invite users
-              </Button>,
-            ]}
-          />
+          <DataroomHeader title={dataroom.name} description={dataroom.pId} />
 
-          <NavMenu
-            navigation={[
-              {
-                label: "Overview",
-                href: `/datarooms/${dataroom.id}`,
-                segment: `${dataroom.id}`,
-              },
-              {
-                label: "Documents",
-                href: `/datarooms/${dataroom.id}/documents`,
-                segment: "documents",
-              },
-              {
-                label: "Users",
-                href: `/datarooms/${dataroom.id}/users`,
-                segment: "users",
-              },
-              {
-                label: "Customization",
-                href: `/datarooms/${dataroom.id}/branding`,
-                segment: "branding",
-              },
-              {
-                label: "Settings",
-                href: `/datarooms/${dataroom.id}/settings`,
-                segment: "settings",
-              },
-            ]}
-          />
+          <DataroomNavigation dataroomId={dataroom.id} />
         </header>
+
+        {features?.roomChangeNotifications && (
+          <Alert>
+            <AlertCircleIcon className="h-4 w-4" />
+            <AlertTitle>Dataroom Change Notifications</AlertTitle>
+            <AlertDescription>
+              Verified visitors will be automatically notified by email when new
+              documents are added to this dataroom.
+            </AlertDescription>
+          </Alert>
+        )}
 
         <div className="space-y-4">
           {/* Visitors */}
           <DataroomViewersTable dataroomId={dataroom.id} />
-
-          <AddViewerModal
-            dataroomId={dataroom.id}
-            open={modalOpen}
-            setOpen={setModalOpen}
-          />
         </div>
       </div>
     </AppLayout>

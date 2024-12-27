@@ -6,6 +6,7 @@ import crypto from "crypto";
 import ms from "ms";
 import { customAlphabet } from "nanoid";
 import { ThreadMessage } from "openai/resources/beta/threads/messages/messages";
+import { rgb } from "pdf-lib";
 import { toast } from "sonner";
 import { twMerge } from "tailwind-merge";
 
@@ -418,6 +419,33 @@ export const convertDataUrlToFile = ({
   return new File([u8arr], filename, { type: mime });
 };
 
+export const validateImageDimensions = (
+  image: string,
+  minSize: number,
+  maxSize: number,
+): Promise<boolean> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = image;
+    img.onload = () => {
+      const { width, height } = img;
+      if (
+        width >= minSize &&
+        height >= minSize &&
+        width <= maxSize &&
+        height <= maxSize
+      ) {
+        resolve(true);
+      } else {
+        resolve(false);
+      }
+    };
+    img.onerror = () => {
+      resolve(false);
+    };
+  });
+};
+
 export const uploadImage = async (file: File) => {
   const newBlob = await upload(file.name, file, {
     access: "public",
@@ -449,7 +477,15 @@ export const generateGravatarHash = (email: string | null): string => {
 export async function generateEncrpytedPassword(
   password: string,
 ): Promise<string> {
+  // If the password is empty, return an empty string
   if (!password) return "";
+  // If the password is already encrypted, return it
+  const textParts: string[] = password.split(":");
+  console.log("textparts in encryption", textParts);
+  if (textParts.length === 2) {
+    return password;
+  }
+  // Otherwise, encrypt the password
   const encryptedKey: string = crypto
     .createHash("sha256")
     .update(String(process.env.NEXT_PRIVATE_DOCUMENT_PASSWORD_KEY))
@@ -491,3 +527,11 @@ export const sanitizeAllowDenyList = (list: string): string[] => {
     .filter((item) => item !== "") // Remove empty items
     .filter((item) => emailRegex.test(item) || domainRegex.test(item)); // Remove items that don't match email or domain regex
 };
+
+export function hexToRgb(hex: string) {
+  let bigint = parseInt(hex.slice(1), 16);
+  let r = ((bigint >> 16) & 255) / 255; // Convert to 0-1 range
+  let g = ((bigint >> 8) & 255) / 255; // Convert to 0-1 range
+  let b = (bigint & 255) / 255; // Convert to 0-1 range
+  return rgb(r, g, g);
+}

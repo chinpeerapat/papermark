@@ -7,12 +7,12 @@ import { LinkUpgradeOptions } from "./link-options";
 export default function EmailAuthenticationSection({
   data,
   setData,
-  hasFreePlan,
+  isAllowed,
   handleUpgradeStateChange,
 }: {
   data: DEFAULT_LINK_TYPE;
   setData: React.Dispatch<React.SetStateAction<DEFAULT_LINK_TYPE>>;
-  hasFreePlan: boolean;
+  isAllowed: boolean;
   handleUpgradeStateChange: ({
     state,
     trigger,
@@ -32,8 +32,6 @@ export default function EmailAuthenticationSection({
       ...data,
       emailProtected: updatedEmailAuthentication ? true : emailProtected,
       emailAuthenticated: updatedEmailAuthentication,
-      allowList: updatedEmailAuthentication ? data.allowList : [],
-      denyList: updatedEmailAuthentication ? data.denyList : [],
     });
     setEnabled(updatedEmailAuthentication);
   };
@@ -42,9 +40,11 @@ export default function EmailAuthenticationSection({
     <div className="pb-5">
       <LinkItem
         title="Require email verification"
+        link="https://www.papermark.io/help/article/require-email-verification"
+        tooltipContent="Users must verify their email before accessing the content."
         enabled={enabled}
         action={handleEnableAuthentication}
-        hasFreePlan={hasFreePlan}
+        isAllowed={isAllowed}
         requiredPlan="pro"
         upgradeAction={() =>
           handleUpgradeStateChange({

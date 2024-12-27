@@ -18,24 +18,26 @@ import {
 } from "react-zoom-pan-pinch";
 import { toast } from "sonner";
 
+import { WatermarkConfig } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/lib/utils/use-media-query";
 
-import LoadingSpinner from "../ui/loading-spinner";
 import { ScreenProtector } from "./ScreenProtection";
 import { TDocumentData } from "./dataroom/dataroom-view";
 import Nav from "./nav";
 import { PoweredBy } from "./powered-by";
 import Question from "./question";
+import { ScreenShield } from "./screen-shield";
 import Toolbar from "./toolbar";
 import ViewDurationSummary from "./visitor-graph";
+import { SVGWatermark } from "./watermark-svg";
 
 const DEFAULT_PRELOADED_IMAGES_NUM = 5;
 
 const trackPageView = async (data: {
   linkId: string;
   documentId: string;
-  viewId: string;
+  viewId?: string;
   duration: number;
   pageNumber: number;
   versionNumber: number;
@@ -43,6 +45,7 @@ const trackPageView = async (data: {
   setViewedPages?: React.Dispatch<
     React.SetStateAction<{ pageNumber: number; duration: number }[]>
   >;
+  isPreview?: boolean;
 }) => {
   data.setViewedPages &&
     data.setViewedPages((prevViewedPages) =>
@@ -52,6 +55,10 @@ const trackPageView = async (data: {
           : page,
       ),
     );
+
+  // If the view is a preview, do not track the view
+  if (data.isPreview) return;
+
   await fetch("/api/record_view", {
     method: "POST",
     body: JSON.stringify(data),
@@ -70,6 +77,7 @@ export default function PagesViewer({
   allowDownload,
   feedbackEnabled,
   screenshotProtectionEnabled,
+  screenShieldPercentage,
   versionNumber,
   brand,
   documentName,
@@ -81,15 +89,26 @@ export default function PagesViewer({
   feedback,
   isVertical = false,
   viewerEmail,
+  isPreview,
+  watermarkConfig,
+  ipAddress,
+  linkName,
 }: {
-  pages: { file: string; pageNumber: string; embeddedLinks: string[] }[];
+  pages: {
+    file: string;
+    pageNumber: string;
+    embeddedLinks: string[];
+    pageLinks: { href: string; coords: string }[];
+    metadata: { width: number; height: number; scaleFactor: number };
+  }[];
   linkId: string;
   documentId: string;
-  viewId: string;
+  viewId?: string;
   assistantEnabled?: boolean;
   allowDownload: boolean;
   feedbackEnabled: boolean;
   screenshotProtectionEnabled: boolean;
+  screenShieldPercentage: number | null;
   versionNumber: number;
   brand?: Partial<Brand> | Partial<DataroomBrand> | null;
   documentName?: string;
@@ -104,6 +123,10 @@ export default function PagesViewer({
   } | null;
   isVertical?: boolean;
   viewerEmail?: string;
+  isPreview?: boolean;
+  watermarkConfig?: WatermarkConfig | null;
+  ipAddress?: string;
+  linkName?: string;
 }) {
   const router = useRouter();
   const { status: sessionStatus } = useSession();
@@ -111,14 +134,15 @@ export default function PagesViewer({
   const showStatsSlideWithAccountCreation =
     showAccountCreationSlide && // if showAccountCreationSlide is enabled
     sessionStatus !== "authenticated" && // and user is not authenticated
-    !dataroomId; // and it's not a dataroom
+    !dataroomId && // and it's not a dataroom
+    !isVertical; // and it's not vertical document
 
   const numPages = pages.length;
   const numPagesWithFeedback =
     enableQuestion && feedback ? numPages + 1 : numPages;
 
   const numPagesWithAccountCreation = showStatsSlideWithAccountCreation
-    ? numPagesWithFeedback
+    ? numPagesWithFeedback + 1
     : numPagesWithFeedback;
 
   const pageQuery = router.query.p ? Number(router.query.p) : 1;
@@ -143,6 +167,8 @@ export default function PagesViewer({
   const [viewedPages, setViewedPages] =
     useState<{ pageNumber: number; duration: number }[]>(initialViewedPages);
 
+  const [isWindowFocused, setIsWindowFocused] = useState(true);
+
   const startTimeRef = useRef(Date.now());
   const pageNumberRef = useRef<number>(pageNumber);
   const visibilityRef = useRef<boolean>(true);
@@ -151,8 +177,57 @@ export default function PagesViewer({
   const hasTrackedDownRef = useRef<boolean>(false);
   const hasTrackedUpRef = useRef<boolean>(false);
   const pinchRefs = useRef<(ReactZoomPanPinchContentRef | null)[]>([]);
+  const imageRefs = useRef<(HTMLImageElement | null)[]>([]);
+
+  const [imageDimensions, setImageDimensions] = useState<
+    Record<number, { width: number; height: number }>
+  >({});
 
   const { isMobile } = useMediaQuery();
+
+  const scaleCoordinates = (coords: string, scaleFactor: number) => {
+    return coords
+      .split(",")
+      .map((coord) => parseFloat(coord) * scaleFactor)
+      .join(",");
+  };
+
+  const getScaleFactor = ({
+    naturalHeight,
+    scaleFactor,
+  }: {
+    naturalHeight: number;
+    scaleFactor: number;
+  }) => {
+    const containerHeight = imageDimensions[pageNumber - 1]
+      ? imageDimensions[pageNumber - 1]!.height
+      : window.innerHeight - 64;
+
+    return (scaleFactor * containerHeight) / naturalHeight;
+  };
+
+  useEffect(() => {
+    const updateImageDimensions = () => {
+      const newDimensions: Record<number, { width: number; height: number }> =
+        {};
+      imageRefs.current.forEach((img, index) => {
+        if (img) {
+          newDimensions[index] = {
+            width: img.clientWidth,
+            height: img.clientHeight,
+          };
+        }
+      });
+      setImageDimensions(newDimensions);
+    };
+
+    updateImageDimensions();
+    window.addEventListener("resize", updateImageDimensions);
+
+    return () => {
+      window.removeEventListener("resize", updateImageDimensions);
+    };
+  }, [loadedImages, pageNumber]);
 
   // Update the previous page number after the effect hook has run
   useEffect(() => {
@@ -181,6 +256,7 @@ export default function PagesViewer({
             versionNumber,
             dataroomId,
             setViewedPages,
+            isPreview,
           });
         }
       }
@@ -207,6 +283,7 @@ export default function PagesViewer({
         versionNumber,
         dataroomId,
         setViewedPages,
+        isPreview,
       });
     }
   }, [pageNumber, numPages]);
@@ -224,6 +301,7 @@ export default function PagesViewer({
           versionNumber,
           dataroomId,
           setViewedPages,
+          isPreview,
         });
       }
     };
@@ -235,6 +313,22 @@ export default function PagesViewer({
     };
   }, [pageNumber, numPages]);
 
+  // Add this effect near your other useEffect hooks
+  useEffect(() => {
+    if (!screenshotProtectionEnabled) return;
+
+    const handleFocus = () => setIsWindowFocused(true);
+    const handleBlur = () => setIsWindowFocused(false);
+
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("blur", handleBlur);
+
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, [screenshotProtectionEnabled]);
+
   useEffect(() => {
     setLoadedImages((prev) =>
       prev.map((loaded, index) =>
@@ -245,14 +339,14 @@ export default function PagesViewer({
 
   useEffect(() => {
     // Remove token and email query parameters on component mount
-    const removeQueryParams = () => {
+    const removeQueryParams = (queries: string[]) => {
       const currentQuery = { ...router.query };
-      delete currentQuery.token;
-      delete currentQuery.email;
+      const currentPath = router.asPath.split("?")[0];
+      queries.map((query) => delete currentQuery[query]);
 
       router.replace(
         {
-          pathname: router.pathname,
+          pathname: currentPath,
           query: currentQuery,
         },
         undefined,
@@ -261,7 +355,7 @@ export default function PagesViewer({
     };
 
     if (!dataroomId && router.query.token) {
-      removeQueryParams();
+      removeQueryParams(["token", "email", "domain", "slug", "linkId"]);
     }
   }, []); // Run once on mount
 
@@ -291,7 +385,17 @@ export default function PagesViewer({
       return;
     }
 
-    preloadImage(DEFAULT_PRELOADED_IMAGES_NUM - 1 + pageNumber);
+    // Always preload surrounding pages during scroll
+    const startPage = Math.max(0, currentPage - 2 - 1);
+    const endPage = Math.min(numPages - 1, currentPage + 2 - 1);
+
+    setLoadedImages((prev) => {
+      const newLoadedImages = [...prev];
+      for (let i = startPage; i <= endPage; i++) {
+        newLoadedImages[i] = true;
+      }
+      return newLoadedImages;
+    });
 
     // Scroll Down Tracking
     if (
@@ -299,6 +403,7 @@ export default function PagesViewer({
       currentPage === pageNumber &&
       !hasTrackedDownRef.current
     ) {
+      // Track the page view
       const duration = Date.now() - startTimeRef.current;
       trackPageView({
         linkId,
@@ -309,6 +414,7 @@ export default function PagesViewer({
         versionNumber,
         dataroomId,
         setViewedPages,
+        isPreview,
       });
       setPageNumber(currentPage);
       pageNumberRef.current = currentPage;
@@ -330,6 +436,7 @@ export default function PagesViewer({
         versionNumber,
         dataroomId,
         setViewedPages,
+        isPreview,
       });
       setPageNumber(currentPage);
       pageNumberRef.current = currentPage;
@@ -344,6 +451,7 @@ export default function PagesViewer({
       currentPage === pageNumber &&
       !hasTrackedUpRef.current
     ) {
+      // Track the page view
       const duration = Date.now() - startTimeRef.current;
       trackPageView({
         linkId,
@@ -354,6 +462,7 @@ export default function PagesViewer({
         versionNumber,
         dataroomId,
         setViewedPages,
+        isPreview,
       });
       setPageNumber(currentPage);
       pageNumberRef.current = currentPage;
@@ -375,6 +484,7 @@ export default function PagesViewer({
         versionNumber,
         dataroomId,
         setViewedPages,
+        isPreview,
       });
       setPageNumber(currentPage);
       pageNumberRef.current = currentPage;
@@ -386,7 +496,7 @@ export default function PagesViewer({
 
   // Function to handle context for screenshotting
   const handleContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (!screenshotProtectionEnabled) {
+    if (!screenshotProtectionEnabled && !screenShieldPercentage) {
       return null;
     }
 
@@ -442,6 +552,9 @@ export default function PagesViewer({
       return;
     }
 
+    // Preload previous pages every 4 pages in advanced
+    preloadImage(pageNumber - 4);
+
     const duration = Date.now() - startTimeRef.current;
     trackPageView({
       linkId,
@@ -452,6 +565,7 @@ export default function PagesViewer({
       versionNumber,
       dataroomId,
       setViewedPages,
+      isPreview,
     });
 
     if (isVertical) {
@@ -488,7 +602,8 @@ export default function PagesViewer({
       return;
     }
 
-    preloadImage(DEFAULT_PRELOADED_IMAGES_NUM - 1 + pageNumber);
+    // Preload the next page every 2 pages in advanced
+    preloadImage(pageNumber + 2);
 
     const duration = Date.now() - startTimeRef.current;
     trackPageView({
@@ -500,6 +615,7 @@ export default function PagesViewer({
       versionNumber,
       dataroomId,
       setViewedPages,
+      isPreview,
     });
 
     if (isVertical) {
@@ -563,6 +679,58 @@ export default function PagesViewer({
     }
   };
 
+  const handleLinkClick = (href: string, event: React.MouseEvent) => {
+    // Check if it's an internal page link or external link
+    const pageMatch = href.match(/#page=(\d+)/);
+    if (pageMatch) {
+      event.preventDefault();
+      const targetPage = parseInt(pageMatch[1]);
+      if (targetPage >= 1 && targetPage <= numPages) {
+        // Track the current page before jumping
+        const duration = Date.now() - startTimeRef.current;
+        trackPageView({
+          linkId,
+          documentId,
+          viewId,
+          duration,
+          pageNumber: pageNumber,
+          versionNumber,
+          dataroomId,
+          setViewedPages,
+          isPreview,
+        });
+
+        // Preload target page and 2 pages on either side
+        const startPage = Math.max(0, targetPage - 2 - 1);
+        const endPage = Math.min(numPages - 1, targetPage + 2 - 1);
+
+        setLoadedImages((prev) => {
+          const newLoadedImages = [...prev];
+          for (let i = startPage; i <= endPage; i++) {
+            newLoadedImages[i] = true;
+          }
+          return newLoadedImages;
+        });
+
+        setPageNumber(targetPage);
+        pageNumberRef.current = targetPage;
+        if (isVertical && containerRef.current) {
+          scrollActionRef.current = true;
+          const newScrollPosition =
+            ((targetPage - 1) * containerRef.current.scrollHeight) /
+            numPagesWithAccountCreation;
+          containerRef.current.scrollTo({
+            top: newScrollPosition,
+            behavior: "smooth",
+          });
+        }
+
+        // Reset the start time for the new page
+        startTimeRef.current = Date.now();
+      }
+    }
+  };
+
   useEffect(() => {
     document.addEventListener("keydown", handleKeyDown);
 
@@ -595,6 +763,7 @@ export default function PagesViewer({
         brand={brand}
         viewId={viewId}
         linkId={linkId}
+        documentId={documentId}
         documentName={documentName}
         embeddedLinks={pages[pageNumber - 1]?.embeddedLinks}
         isDataroom={dataroomId ? true : false}
@@ -602,89 +771,220 @@ export default function PagesViewer({
         documentRefs={pinchRefs}
         isVertical={isVertical}
         isMobile={isMobile}
+        isPreview={isPreview}
+        hasWatermark={watermarkConfig ? true : false}
       />
       <div
         style={{ height: "calc(100dvh - 64px)" }}
         className={cn("relative flex items-center", isVertical && "h-dvh")}
       >
         <div
-          className={`relative flex h-full w-full ${
-            isVertical ? "flex-col overflow-y-auto" : "flex-row"
-          }`}
+          className={cn(
+            "relative flex h-full w-full",
+            isVertical ? "flex-col overflow-y-auto" : "flex-row",
+            !isWindowFocused &&
+              screenshotProtectionEnabled &&
+              "blur-xl transition-all duration-300",
+          )}
           ref={containerRef}
         >
           <div
-            className={`flex ${isVertical ? "flex-col items-center" : "flex-row justify-center"} w-full`}
+            className={cn(
+              "flex w-full",
+              isVertical ? "flex-col items-center" : "flex-row justify-center",
+            )}
             onContextMenu={handleContextMenu}
           >
             {pageNumber <= numPagesWithAccountCreation &&
             pages &&
             loadedImages[pageNumber - 1]
               ? pages.map((page, index) => (
-                  <TransformWrapper
-                    key={index}
-                    initialScale={scale}
-                    initialPositionX={0}
-                    initialPositionY={0}
-                    disabled={isVertical && isMobile}
-                    panning={{
-                      lockAxisY: isVertical,
-                      velocityDisabled: true,
-                      wheelPanning: false,
-                    }}
-                    wheel={{ disabled: true }}
-                    pinch={{ disabled: true }}
-                    doubleClick={{ disabled: true }}
-                    onZoom={(ref) => {
-                      setScale(ref.state.scale);
-                    }}
-                    ref={(ref) => {
-                      pinchRefs.current[index] = ref;
-                    }}
-                    customTransform={(x: number, y: number, scale: number) => {
-                      // Keep the translateY value constant
-                      if (isVertical) {
-                        const transform = `translate(${x}px, ${index * y * -2}px) scale(${scale})`;
+                  <React.Fragment key={index}>
+                    <TransformWrapper
+                      key={index}
+                      initialScale={scale}
+                      initialPositionX={0}
+                      initialPositionY={0}
+                      disabled={isVertical && isMobile}
+                      panning={{
+                        lockAxisY: isVertical,
+                        velocityDisabled: true,
+                        wheelPanning: false,
+                      }}
+                      wheel={{ disabled: true }}
+                      pinch={{ disabled: true }}
+                      doubleClick={{ disabled: true }}
+                      onZoom={(ref) => {
+                        setScale(ref.state.scale);
+                      }}
+                      ref={(ref) => {
+                        pinchRefs.current[index] = ref;
+                      }}
+                      customTransform={(
+                        x: number,
+                        y: number,
+                        scale: number,
+                      ) => {
+                        // Keep the translateY value constant
+                        if (isVertical) {
+                          const transform = `translate(${x}px, ${index * y * -2}px) scale(${scale})`;
+                          return transform;
+                        }
+                        const transform = `translate(${x}px, ${y}px) scale(${scale})`;
                         return transform;
-                      }
-                      const transform = `translate(${x}px, ${y}px) scale(${scale})`;
-                      return transform;
-                    }}
-                  >
-                    <TransformComponent
-                      wrapperClass={cn(
-                        isVertical
-                          ? "!overflow-x-clip !overflow-y-visible"
-                          : isMobile
-                            ? "!overflow-x-clip !overflow-y-clip"
-                            : "!overflow-x-visible !overflow-y-clip",
-                      )}
-                      contentClass={cn(isVertical && "!w-dvw")}
+                      }}
                     >
-                      <div
-                        key={index}
-                        style={{ height: "calc(100dvh - 64px)" }}
-                        className={cn(
-                          "relative w-full",
-                          pageNumber - 1 === index
-                            ? "block"
-                            : !isVertical
-                              ? "hidden"
-                              : "block",
+                      <TransformComponent
+                        wrapperClass={cn(
+                          !isVertical && "!h-full",
+                          isVertical
+                            ? "!overflow-x-clip !overflow-y-visible"
+                            : isMobile
+                              ? "!overflow-x-clip !overflow-y-clip"
+                              : "!overflow-x-visible !overflow-y-clip",
+                        )}
+                        contentClass={cn(
+                          !isVertical && "!h-full",
+                          isVertical && "!w-dvw !h-[calc(100dvh-64px)]",
                         )}
                       >
-                        <img
-                          className={cn("h-full w-full object-contain")}
-                          src={
-                            loadedImages[index]
-                              ? page.file
-                              : "https://www.papermark.io/_static/blank.gif"
-                          }
-                          alt={`Page ${index + 1}`}
-                        />
-                      </div>
-                    </TransformComponent>
-                  </TransformWrapper>
+                        <div
+                          key={index}
+                          className={cn(
+                            "relative my-auto w-full",
+                            pageNumber - 1 === index && !isVertical
+                              ? "block"
+                              : "hidden",
+                            isVertical && "flex justify-center",
+                          )}
+                        >
+                          <img
+                            className={cn(
+                              "!pointer-events-auto object-contain",
+                              isVertical && "h-auto",
+                            )}
+                            style={{
+                              maxHeight: "calc(100dvh - 64px)",
+                            }}
+                            // ref={(ref) => {
+                            //   imageRefs.current[index] = ref;
+                            // }}
+                            ref={(ref) => {
+                              imageRefs.current[index] = ref;
+                              if (ref) {
+                                ref.onload = () =>
+                                  setImageDimensions((prev) => ({
+                                    ...prev,
+                                    [index]: {
+                                      width: ref.clientWidth,
+                                      height: ref.clientHeight,
+                                    },
+                                  }));
+                              }
+                            }}
+                            useMap={`#page-map-${index + 1}`}
+                            src={
+                              loadedImages[index]
+                                ? page.file
+                                : "https://www.papermark.io/_static/blank.gif"
+                            }
+                            alt={`Page ${index + 1}`}
+                          />
+
+                          {/* Add Watermark Component */}
+                          {watermarkConfig ? (
+                            <SVGWatermark
+                              config={watermarkConfig}
+                              viewerData={{
+                                email: viewerEmail,
+                                date: new Date().toLocaleDateString(),
+                                time: new Date().toLocaleTimeString(),
+                                link: linkName,
+                                ipAddress: ipAddress,
+                              }}
+                              documentDimensions={
+                                imageDimensions[index] || {
+                                  width: 0,
+                                  height: 0,
+                                }
+                              }
+                              pageIndex={index}
+                            />
+                          ) : null}
+
+                          {page.pageLinks ? (
+                            <map name={`page-map-${index + 1}`}>
+                              {page.pageLinks
+                                .filter((link) => !link.href.includes(".gif"))
+                                .map((link, index) => (
+                                  <area
+                                    key={index}
+                                    shape="rect"
+                                    coords={scaleCoordinates(
+                                      link.coords,
+                                      getScaleFactor({
+                                        naturalHeight: page.metadata.height,
+                                        scaleFactor: page.metadata.scaleFactor,
+                                      }),
+                                    )}
+                                    href={link.href}
+                                    onClick={(e) =>
+                                      handleLinkClick(link.href, e)
+                                    }
+                                    target={
+                                      link.href.startsWith("#")
+                                        ? "_self"
+                                        : "_blank"
+                                    }
+                                    rel={
+                                      link.href.startsWith("#")
+                                        ? undefined
+                                        : "noopener noreferrer"
+                                    }
+                                  />
+                                ))}
+                            </map>
+                          ) : null}
+
+                          {/** Automatically Render Overlays **/}
+                          {page.pageLinks
+                            ? page.pageLinks
+                                .filter((link) => link.href.includes(".gif"))
+                                .map((link, linkIndex) => {
+                                  const [x1, y1, x2, y2] = scaleCoordinates(
+                                    link.coords,
+                                    getScaleFactor({
+                                      naturalHeight: page.metadata.height,
+                                      scaleFactor: page.metadata.scaleFactor,
+                                    }),
+                                  )
+                                    .split(",")
+                                    .map(Number);
+
+                                  const overlayWidth = x2 - x1;
+                                  const overlayHeight = y2 - y1;
+
+                                  return (
+                                    <img
+                                      key={`overlay-${index}-${linkIndex}`}
+                                      src={link.href} // Assuming the href points to a GIF or overlay image
+                                      alt={`Overlay ${index + 1}`}
+                                      style={{
+                                        position: "absolute",
+                                        top: y1,
+                                        left: x1,
+                                        width: `${overlayWidth}px`,
+                                        height: `${overlayHeight}px`,
+                                        pointerEvents: "none", // To ensure the overlay doesn't interfere with interaction
+                                      }}
+                                    />
+                                  );
+                                })
+                            : null}
+                        </div>
+                      </TransformComponent>
+                    </TransformWrapper>
+                  </React.Fragment>
                 ))
               : null}
 
@@ -700,12 +1000,14 @@ export default function PagesViewer({
                   viewId={viewId}
                   submittedFeedback={submittedFeedback}
                   setSubmittedFeedback={setSubmittedFeedback}
+                  isPreview={isPreview}
                 />
               </div>
             ) : null}
 
-            {/* {showStatsSlideWithAccountCreation &&
-            (isVertical || pageNumber === numPagesWithAccountCreation) ? (
+            {showStatsSlideWithAccountCreation &&
+            !isVertical &&
+            pageNumber === numPagesWithAccountCreation ? (
               <div
                 className={cn("relative block h-dvh w-full")}
                 style={{ height: "calc(100dvh - 64px)" }}
@@ -718,7 +1020,7 @@ export default function PagesViewer({
                   setAccountCreated={setAccountCreated}
                 />
               </div>
-            ) : null} */}
+            ) : null}
           </div>
         </div>
 
@@ -779,7 +1081,14 @@ export default function PagesViewer({
           </>
         )}
         {feedbackEnabled && pageNumber <= numPages ? (
-          <Toolbar viewId={viewId} pageNumber={pageNumber} />
+          <Toolbar
+            viewId={viewId}
+            pageNumber={pageNumber}
+            isPreview={isPreview}
+          />
+        ) : null}
+        {!!screenShieldPercentage ? (
+          <ScreenShield visiblePercentage={screenShieldPercentage} />
         ) : null}
         {screenshotProtectionEnabled ? <ScreenProtector /> : null}
         {showPoweredByBanner ? <PoweredBy linkId={linkId} /> : null}
